@@ -51,6 +51,7 @@ struct flb_kube *flb_kube_conf_create(struct flb_filter_instance *i,
     ctx->config = config;
     ctx->merge_json_log = FLB_FALSE;
     ctx->annotations = FLB_TRUE;
+    ctx->flat = FLB_FALSE;
     ctx->dummy_meta = FLB_FALSE;
     ctx->tls_debug = -1;
     ctx->tls_verify = FLB_TRUE;
@@ -182,6 +183,53 @@ struct flb_kube *flb_kube_conf_create(struct flb_filter_instance *i,
     tmp = flb_filter_get_property("annotations", i);
     if (tmp) {
         ctx->annotations = flb_utils_bool(tmp);
+    }
+
+    /* Flat Kubernetes Metadata */
+    tmp = flb_filter_get_property("flat", i);
+    if (tmp) {
+        ctx->flat = flb_utils_bool(tmp);
+    }
+
+    /* Define Flat Kubernetes Metadata for Prefix and Delimiter */
+    if (ctx->flat == FLB_TRUE) {
+        int prefix_len = 0;
+        /* Flat Prefix */
+        tmp = flb_filter_get_property("flat_prefix", i);
+        if (!tmp) {
+            ctx->flat_prefix = flb_strdup(FLB_KUBE_FLAT_PREFIX);
+        }
+        else {
+            ctx->flat_prefix = flb_strdup(tmp);
+        }
+        prefix_len += strlen(ctx->flat_prefix);
+
+        /* Flat Delimiter */
+        tmp = flb_filter_get_property("flat_delimiter", i);
+        if (!tmp) {
+            ctx->flat_delimiter = flb_strdup(FLB_KUBE_FLAT_DELIMITER);
+        }
+        else {
+            ctx->flat_delimiter = flb_strdup(tmp);
+        }
+        prefix_len += strlen(ctx->flat_delimiter);
+
+        /* Avoid buffer overflow */
+        if ( prefix_len > 16) {
+            flb_error("[filter_kube] invalid prefix or delimiter length=%i (maximum length 16), using default prefix=\"%s\" and delimeter=\"%s\"", prefix_len, flb_strdup(FLB_KUBE_FLAT_PREFIX), flb_strdup(FLB_KUBE_FLAT_DELIMITER));
+            ctx->flat_prefix = flb_strdup(FLB_KUBE_FLAT_PREFIX);
+            ctx->flat_delimiter = flb_strdup(FLB_KUBE_FLAT_DELIMITER);
+        }
+        strcpy(ctx->flat_key_prefix, ctx->flat_prefix);
+        strcat(ctx->flat_key_prefix, ctx->flat_delimiter);
+
+        strcpy(ctx->flat_labels_prefix, ctx->flat_key_prefix);
+        strcat(ctx->flat_labels_prefix,"labels");
+        strcat(ctx->flat_labels_prefix, ctx->flat_delimiter);
+
+        strcpy(ctx->flat_annotations_prefix, ctx->flat_key_prefix);
+        strcat(ctx->flat_annotations_prefix,"annotations");
+        strcat(ctx->flat_annotations_prefix, ctx->flat_delimiter);
     }
 
     /* Use Systemd Journal */

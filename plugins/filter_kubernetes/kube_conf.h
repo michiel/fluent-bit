@@ -62,9 +62,17 @@ struct flb_kube {
     int api_https;
     int use_journal;
     int annotations;
+    int flat;
+    char *flat_prefix;
+    char *flat_delimiter;
     int dummy_meta;
     int tls_debug;
     int tls_verify;
+
+    /* Flat Parameters */
+    char flat_key_prefix[16];
+    char flat_labels_prefix[24];
+    char flat_annotations_prefix[32];
 
     /* HTTP Client Setup */
     size_t buffer_size;

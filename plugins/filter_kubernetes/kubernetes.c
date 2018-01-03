@@ -190,7 +190,20 @@ static int pack_map_content(msgpack_packer *pck, msgpack_sbuffer *sbuf,
 
     /* Kubernetes metadata */
     if (kube_buf && kube_size > 0) {
-        new_map_size++;
+        if (ctx->flat == FLB_FALSE) {
+            new_map_size++;
+        }
+        else {
+            off = 0;
+            msgpack_unpacked_init(&result);
+            msgpack_unpack_next(&result, kube_buf, kube_size, &off);
+            root = result.data;
+
+            new_map_size += root.via.map.size;
+            new_map_size += meta->skip;
+
+            msgpack_unpacked_destroy(&result);
+        }
     }
 
     /* Start packaging the final map */
@@ -249,46 +262,158 @@ static int pack_map_content(msgpack_packer *pck, msgpack_sbuffer *sbuf,
 
     /* Kubernetes */
     if (kube_buf && kube_size > 0) {
-        msgpack_pack_str(pck, 10);
-        msgpack_pack_str_body(pck, "kubernetes", 10);
-
         off = 0;
         msgpack_unpacked_init(&result);
         msgpack_unpack_next(&result, kube_buf, kube_size, &off);
         root = result.data;
 
-        /* root points to a map, calc the final size */
-        map_size = root.via.map.size;
-        map_size += meta->skip;
+        if (ctx->flat == FLB_FALSE) {
+            msgpack_pack_str(pck, 10);
+            msgpack_pack_str_body(pck, "kubernetes", 10);
+    
+            map_size = root.via.map.size;
+            map_size += meta->skip;
 
-        /* Pack cached kube buf entries */
-        msgpack_pack_map(pck, map_size);
-        for (i = 0; i < root.via.map.size; i++) {
-            k = root.via.map.ptr[i].key;
-            v = root.via.map.ptr[i].val;
-            msgpack_pack_object(pck, k);
-            msgpack_pack_object(pck, v);
+            /* Pack cached kube buf entries */
+            msgpack_pack_map(pck, map_size);
+            for (i = 0; i < root.via.map.size; i++) {
+                k = root.via.map.ptr[i].key;
+                v = root.via.map.ptr[i].val;
+                msgpack_pack_object(pck, k);
+                msgpack_pack_object(pck, v);
+            }
+        } else {
+            char *key_ptr = NULL;
+            size_t key_size = 0;
+
+            for (i = 0; i < root.via.map.size; i++) {
+                k = root.via.map.ptr[i].key;
+                v = root.via.map.ptr[i].val;
+                
+                /* Key should be a string - otherwise ignore */
+                if (k.type == MSGPACK_OBJECT_STR) {
+                    key_ptr  = (char *) k.via.str.ptr;
+                    key_size = k.via.str.size;
+                    msgpack_pack_str(pck, key_size);
+                    msgpack_pack_str_body(pck, key_ptr, key_size);
+                    msgpack_pack_object(pck, v);
+                }
+            }
         }
+        
+        /*else {
+            int i;
+            char *ptr_key = NULL;
+            char buf_key[256];
+            msgpack_object *k;
+            msgpack_object *v;
+            for (i = 0; i < root.via.map.size; i++) {
+                k = &root.via.map.ptr[i].key;
+                v = &root.via.map.ptr[i].val;
+                ptr_key = NULL;
+        
+                /* Store key 
+                char *key_ptr = NULL;
+                size_t key_size = 0;
+                size_t new_key_size = 0;
+
+                /* Prefix and Delimiter 
+                size_t prefix_size = strlen(ctx->flat_prefix);
+                size_t delimiter_size = strlen(ctx->flat_delimiter);
+                size_t buff_size = sizeof(buf_key) - 1;
+                buff_size -= prefix_size;
+                buff_size -= delimiter_size;
+
+                if (k->type == MSGPACK_OBJECT_STR) {
+                    key_ptr  = (char *) k->via.str.ptr;
+                    key_size = k->via.str.size;
+                    new_key_size += key_size;
+                    new_key_size += prefix_size;
+                    new_key_size += delimiter_size;
+
+                    if (key_size < buff_size) {
+                        strcpy(buf_key, ctx->flat_prefix);
+                        strcat(buf_key, ctx->flat_delimiter);
+                        strcat(buf_key, key_ptr);
+
+                        buf_key[new_key_size] = '\0';
+                        ptr_key = buf_key;
+                    }
+                    else {
+                        /* Long map keys have a performance penalty 
+                        ptr_key = flb_malloc(new_key_size + 1);
+                        strcpy(ptr_key, ctx->flat_prefix);
+                        strcat(ptr_key, ctx->flat_delimiter);
+                        strcat(ptr_key, key_ptr);
+                        ptr_key[new_key_size] = '\0';
+                    }
+
+                     /* Append the key 
+                    msgpack_pack_str(pck, new_key_size);
+                    msgpack_pack_str_body(pck, ptr_key, new_key_size);
+
+                    /* Release temporal key if was allocated 
+                    if (ptr_key && ptr_key != buf_key) {
+                        flb_free(ptr_key);
+                    }
+                    ptr_key = NULL;
+
+                    msgpack_pack_object(pck, *v);
+                }
+            }
+        } */
         msgpack_unpacked_destroy(&result);
 
+        char buf_key[256];
+        size_t buf_size = 0;
         /* Pack meta */
         if (meta->container_name != NULL) {
-            msgpack_pack_str(pck, 14);
-            msgpack_pack_str_body(pck, "container_name", 14);
+            if (ctx->flat == FLB_FALSE) {
+                msgpack_pack_str(pck, 14);
+                msgpack_pack_str_body(pck, "container_name", 14);
+            } 
+            else {
+                strcpy(buf_key, ctx->flat_key_prefix);
+                strcat(buf_key, "container_name");
+                buf_size = strlen(buf_key);
+    
+                msgpack_pack_str(pck, buf_size);
+                msgpack_pack_str_body(pck, buf_key, buf_size);
+            }
             msgpack_pack_str(pck, meta->container_name_len);
             msgpack_pack_str_body(pck, meta->container_name,
                                   meta->container_name_len);
         }
         if (meta->docker_id != NULL) {
-            msgpack_pack_str(pck, 9);
-            msgpack_pack_str_body(pck, "docker_id", 9);
+            if (ctx->flat == FLB_FALSE) {
+                msgpack_pack_str(pck, 9);
+                msgpack_pack_str_body(pck, "docker_id", 9);
+            } 
+            else {
+                strcpy(buf_key, ctx->flat_key_prefix);
+                strcat(buf_key, "docker_id");
+                buf_size = strlen(buf_key);
+    
+                msgpack_pack_str(pck, buf_size);
+                msgpack_pack_str_body(pck, buf_key, buf_size);
+            }
             msgpack_pack_str(pck, meta->docker_id_len);
             msgpack_pack_str_body(pck, meta->docker_id,
                                   meta->docker_id_len);
         }
         if (meta->container_hash != NULL) {
-            msgpack_pack_str(pck, 14);
-            msgpack_pack_str_body(pck, "container_hash", 14);
+            if (ctx->flat == FLB_FALSE) {
+                msgpack_pack_str(pck, 14);
+                msgpack_pack_str_body(pck, "container_hash", 14);
+            } 
+            else {
+                strcpy(buf_key, ctx->flat_key_prefix);
+                strcat(buf_key, "container_hash");
+                buf_size = strlen(buf_key);
+    
+                msgpack_pack_str(pck, buf_size);
+                msgpack_pack_str_body(pck, buf_key, buf_size);
+            }
             msgpack_pack_str(pck, meta->container_hash_len);
             msgpack_pack_str_body(pck, meta->container_hash,
                                   meta->container_hash_len);
