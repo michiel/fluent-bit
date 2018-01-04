@@ -392,8 +392,13 @@ void cb_http_flush(void *data, size_t bytes,
         /*
          * Only allow the following HTTP status:
          * 
-         * - 200: OK - 201: Created - 202: Accepted - 203: no authorative resp -
-         * 204: No Content - 205: Reset content
+         * - 200: OK
+         * - 201: Created
+         * - 202: Accepted
+         * - 203: no authorative resp
+         * - 204: No Content
+         * - 205: Reset content
+         * 
          */
         if (c->resp.status < 200 || c->resp.status > 205) {
             flb_error("[out_http] HTTP STATUS=%i", c->resp.status);
