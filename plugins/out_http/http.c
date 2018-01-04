@@ -102,27 +102,27 @@ static char *msgpack_to_json(struct flb_out_http_config *ctx, char *data, uint64
 
     /* Optionally convert to JSON stream from JSON array */
     if (ctx->out_format == FLB_HTTP_OUT_JSON_STREAM) {
-        char *p = json_buf;
+        char *p;
         char *end = json_buf + json_size;
-        int count = 0;
-        int skip = FLB_FALSE;
+        int level = 0;
+        int in_string = FLB_FALSE;
+        int in_escape = FLB_FALSE;
 
-        while (p != end) {
-            if (((*p == '[') || (*p == ']') || (*p == ',')) && count == 0 && skip == FLB_FALSE) {
-                *p = ' ';
+        for (p = json_buf; p!=end; p++) {
+            if (in_escape)
+                in_escape = FLB_FALSE;
+            else if (*p == '\\')
+                in_escape = FLB_TRUE;
+            else if (*p == '"')
+                in_string = !in_string;
+            else if (!in_string) {
+                if (*p == '{')
+                    level++;
+                else if (*p == '}')
+                    level--;
+                else if ((*p == '[' || *p == ']' || *p == ',') && level == 0)
+                    *p=' ';
             }
-            else if ((*p == '{') && (skip == FLB_FALSE)) {
-                count++;
-            }
-            else if ((*p == '}') && (skip == FLB_FALSE)) {
-                count--;
-            }
-            else if ((*p == '"') && (count != 0)) {
-                if (*(p - 1) != '\\') {
-                    skip = !skip;
-                }
-            }
-            p++;
         }
     }
 
