@@ -71,7 +71,7 @@ static int configure(struct record_modifier_ctx *ctx,
             ctx->whitelist_keys_num++;
         }
         else if (!strcasecmp(prop->key, "rename_key")) {
-            mod_record = flb_malloc(sizeof(struct modifier_key));
+            mod_record = flb_malloc(sizeof(struct modifier_record));
             if (!mod_record) {
                 flb_errno();
                 continue;
@@ -92,6 +92,8 @@ static int configure(struct record_modifier_ctx *ctx,
             sentry = mk_list_entry_last(split, struct flb_split_entry, _head);
             mod_record->val = flb_strndup(sentry->value, sentry->len);
             mod_record->val_len = sentry->len;
+
+            flb_info("rename_keys property kv: %s / %s", mod_record->key, mod_record->val);
 
             flb_utils_split_free(split);
             mk_list_add(&mod_record->_head, &ctx->rename_keys);
