@@ -38,15 +38,18 @@ struct record_modifier_ctx {
     int records_num;
     int remove_keys_num;
     int whitelist_keys_num;
+    int rename_keys_num;
     struct mk_list records;
     struct mk_list remove_keys;
     struct mk_list whitelist_keys;
+    struct mk_list rename_keys;
 };
 
 typedef enum {
     TO_BE_REMOVED = 0,
     TO_BE_REMAINED = 1,
-    TAIL_OF_ARRAY = 2
+    TAIL_OF_ARRAY = 2,
+    TO_BE_RENAMED = 3
 } bool_map_t;
 
 
