@@ -203,7 +203,7 @@ static int cb_modifier_init(struct flb_filter_instance *f_ins,
 }
 
 static int make_bool_map(struct record_modifier_ctx *ctx, msgpack_object *map,
-                         bool_map_t *bool_map, int map_num)
+                         bool_map_t *bool_map)
 {
     struct mk_list *tmp;
     struct mk_list *head;
@@ -214,6 +214,7 @@ static int make_bool_map(struct record_modifier_ctx *ctx, msgpack_object *map,
     char result;
     char is_to_delete;
     msgpack_object *key;
+    int map_num = map->via.map.size;
     int ret = map_num;
     int i;
 
@@ -313,7 +314,7 @@ static int cb_modifier_filter(void *data, size_t bytes,
         if (obj->type == MSGPACK_OBJECT_MAP) {
             map_num = obj->via.map.size;
             removed_map_num = make_bool_map(ctx, obj,
-                                            bool_map, obj->via.map.size);
+                                            bool_map);
         } else {
             continue;
         }
