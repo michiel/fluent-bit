@@ -128,6 +128,10 @@ static int configure(struct record_modifier_ctx *ctx,
         }
     }
 
+    if (ctx->rename_keys_num > 0 && ctx->whitelist_keys_num > 0) {
+        flb_error("rename_keys and whitelist_keys are exclusive with each other.");
+        return -1;
+    }
     if (ctx->remove_keys_num > 0 && ctx->whitelist_keys_num > 0) {
         flb_error("remove_keys and whitelist_keys are exclusive with each other.");
         return -1;
@@ -208,6 +212,7 @@ static int make_bool_map(struct record_modifier_ctx *ctx, msgpack_object *map,
     struct mk_list *tmp;
     struct mk_list *head;
     struct mk_list *check = NULL;
+    struct mk_list *record_check = NULL;
     msgpack_object_kv *kv;
     struct modifier_key *mod_key;
 
@@ -217,6 +222,8 @@ static int make_bool_map(struct record_modifier_ctx *ctx, msgpack_object *map,
     int map_num = map->via.map.size;
     int ret = map_num;
     int i;
+
+    char is_to_rename = FLB_FALSE;
 
     for (i=0; i<map_num; i++) {
         bool_map[i] = TO_BE_REMAINED;
@@ -232,8 +239,10 @@ static int make_bool_map(struct record_modifier_ctx *ctx, msgpack_object *map,
         is_to_delete = FLB_FALSE;
     }
     else if(ctx->rename_keys_num > 0) {
+	flb_debug("Rename keys found");
         check = &(ctx->rename_keys);
         is_to_delete = FLB_FALSE;
+	is_to_rename = FLB_TRUE;;
     }
 
     if (check != NULL){
@@ -259,14 +268,19 @@ static int make_bool_map(struct record_modifier_ctx *ctx, msgpack_object *map,
                     break;
                 }
             }
-            if (result == is_to_delete) {
+	    if ((result != FLB_TRUE) && (is_to_rename == FLB_TRUE)) {
+		flb_debug("Rename operation matched");
+                bool_map[i] = TO_BE_RENAMED;
+	    }
+	    else if (result == is_to_delete) {
                 bool_map[i] = TO_BE_REMOVED;
                 ret--;
             }
+
         }
     }
 
-    return ret;
+    return ret; // number of items in the map after operations have been applied
 }
 
 static int cb_modifier_filter(void *data, size_t bytes,
@@ -335,6 +349,10 @@ static int cb_modifier_filter(void *data, size_t bytes,
         kv = obj->via.map.ptr;
         for(i=0; bool_map[i] != TAIL_OF_ARRAY; i++) {
             if (bool_map[i] == TO_BE_REMAINED) {
+                msgpack_pack_object(&tmp_pck, (kv+i)->key);
+                msgpack_pack_object(&tmp_pck, (kv+i)->val);
+            }
+	    else if (bool_map[i] == TO_BE_RENAMED) {
                 msgpack_pack_object(&tmp_pck, (kv+i)->key);
                 msgpack_pack_object(&tmp_pck, (kv+i)->val);
             }
