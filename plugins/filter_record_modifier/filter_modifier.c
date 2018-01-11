@@ -212,9 +212,9 @@ static int make_bool_map(struct record_modifier_ctx *ctx, msgpack_object *map,
     struct mk_list *tmp;
     struct mk_list *head;
     struct mk_list *check = NULL;
-    struct mk_list *record_check = NULL;
     msgpack_object_kv *kv;
     struct modifier_key *mod_key;
+    struct modifier_record *mod_record;
 
     char result;
     char is_to_delete;
@@ -239,13 +239,50 @@ static int make_bool_map(struct record_modifier_ctx *ctx, msgpack_object *map,
         is_to_delete = FLB_FALSE;
     }
     else if(ctx->rename_keys_num > 0) {
-	flb_debug("Rename keys found");
+	flb_debug("Configured for renaming keys");
         check = &(ctx->rename_keys);
         is_to_delete = FLB_FALSE;
 	is_to_rename = FLB_TRUE;;
     }
 
-    if (check != NULL){
+    if (check != NULL && is_to_rename){
+        kv = map->via.map.ptr;
+        for(i=0; i<map_num; i++){
+            key = &(kv+i)->key;
+            result = FLB_FALSE;
+
+            mk_list_foreach_safe(head, tmp, check) {
+                mod_record = mk_list_entry(head, struct modifier_record,  _head);
+                if (key->via.bin.size != mod_record->key_len &&
+                    key->via.str.size != mod_record->key_len) {
+		    flb_debug("No match key %s against %s/%s ", key->via.str.ptr, mod_record->key, mod_record->val);
+                    continue;
+                }
+                if (key->type == MSGPACK_OBJECT_BIN &&
+                     !strncasecmp(key->via.bin.ptr, mod_record->key,
+                                 mod_record->key_len)) {
+		    flb_debug("Matched key %s against %s/%s ", key->via.bin.ptr, mod_record->key, mod_record->val);
+                    result = FLB_TRUE;
+                    break;
+		}
+		else if (key->type == MSGPACK_OBJECT_STR &&
+                     !strncasecmp(key->via.str.ptr, mod_record->key,
+                                 mod_record->key_len))
+		{
+		    flb_debug("Matched key %s against %s/%s ", key->via.str.ptr, mod_record->key, mod_record->val);
+                    result = FLB_TRUE;
+                    break;
+                } else {
+		    flb_debug("No match for key %s against record %s", key->via.str.ptr, mod_record->key);
+		}
+            }
+	    if ((result != FLB_TRUE) && (is_to_rename == FLB_TRUE)) {
+		flb_debug("Rename operation matched");
+                bool_map[i] = TO_BE_RENAMED;
+	    }
+        }
+    }
+    else if (check != NULL){
         kv = map->via.map.ptr;
         for(i=0; i<map_num; i++){
             key = &(kv+i)->key;
@@ -266,13 +303,9 @@ static int make_bool_map(struct record_modifier_ctx *ctx, msgpack_object *map,
                     ) {
                     result = FLB_TRUE;
                     break;
-                }
+		}
             }
-	    if ((result != FLB_TRUE) && (is_to_rename == FLB_TRUE)) {
-		flb_debug("Rename operation matched");
-                bool_map[i] = TO_BE_RENAMED;
-	    }
-	    else if (result == is_to_delete) {
+	    if (result == is_to_delete) {
                 bool_map[i] = TO_BE_REMOVED;
                 ret--;
             }
