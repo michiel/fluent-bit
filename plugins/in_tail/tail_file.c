@@ -237,6 +237,12 @@ static int process_content(struct flb_tail_file *file, off_t *bytes)
                               (char**) &out_buf, &out_size, file);
                 flb_free(out_buf);
             }
+            else {
+                /* Parser failed, pack raw text */
+                flb_time_get(&out_time);
+                flb_tail_file_pack_line(out_sbuf, out_pck, &out_time,
+                                        data, len, file);
+            }
         }
         else if (ctx->multiline == FLB_TRUE) {
             ret = flb_tail_mult_process_content(now,
@@ -688,9 +694,16 @@ int flb_tail_file_to_event(struct flb_tail_file *file)
 
     /* Check if this file have been rotated */
     name = flb_tail_file_name(file);
+    if (!name) {
+        flb_debug("[in_tail] cannot detect if file was rotated: %s",
+                  file->name);
+        return -1;
+    }
+
     if (strcmp(name, file->name) != 0) {
         ret = stat(name, &st_rotated);
         if (ret == -1) {
+            flb_free(name);
             return -1;
         }
         else if (st_rotated.st_ino != st.st_ino) {

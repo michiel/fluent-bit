@@ -45,6 +45,7 @@
  */
 struct flb_sched_timer {
     struct mk_event event;
+    int active;
     int type;
     void *data;
 
@@ -56,6 +57,9 @@ struct flb_sched_timer {
      */
     int timer_fd;
     void (*cb)(struct flb_config *, void *);
+
+    /* Parent context */
+    struct flb_config *config;
 
     /* link to flb_sched->timers */
     struct mk_list _head;
@@ -98,6 +102,12 @@ struct flb_sched {
     /* Timers: list of timers for different purposes */
     struct mk_list timers;
 
+    /*
+     * Timers_Drop: list of invalidated timers that needs to
+     * be free()d once the event loop finish the cycle.
+     */
+    struct mk_list timers_drop;
+
     /* Frame timer context */
     flb_pipefd_t frame_fd;
 
@@ -124,5 +134,7 @@ int flb_sched_timer_cb_create(struct flb_config *config, int ms,
                               void *data);
 int flb_sched_timer_cb_disable(struct flb_sched_timer *timer);
 int flb_sched_timer_cb_destroy(struct flb_sched_timer *timer);
+void flb_sched_timer_invalidate(struct flb_sched_timer *timer);
+int flb_sched_timer_cleanup(struct flb_sched *sched);
 
 #endif
