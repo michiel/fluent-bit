@@ -29,13 +29,13 @@
 
 #define PLUGIN_NAME "filter_record_modifier"
 
-static int configure(struct record_modifier_ctx *ctx,
-                     struct flb_filter_instance *f_ins)
+static int
+configure(struct record_modifier_ctx *ctx, struct flb_filter_instance *f_ins)
 {
     struct mk_list *head = NULL;
     struct mk_list *split;
     struct flb_config_prop *prop = NULL;
-    struct modifier_key    *mod_key;
+    struct modifier_key *mod_key;
     struct modifier_record *mod_record;
     struct flb_split_entry *sentry;
 
@@ -54,7 +54,7 @@ static int configure(struct record_modifier_ctx *ctx,
                 flb_errno();
                 continue;
             }
-            mod_key->key     = prop->val;
+            mod_key->key = prop->val;
             mod_key->key_len = strlen(prop->val);
             mk_list_add(&mod_key->_head, &ctx->remove_keys);
             ctx->remove_keys_num++;
@@ -65,7 +65,7 @@ static int configure(struct record_modifier_ctx *ctx,
                 flb_errno();
                 continue;
             }
-            mod_key->key     = prop->val;
+            mod_key->key = prop->val;
             mod_key->key_len = strlen(prop->val);
             mk_list_add(&mod_key->_head, &ctx->whitelist_keys);
             ctx->whitelist_keys_num++;
@@ -78,14 +78,16 @@ static int configure(struct record_modifier_ctx *ctx,
             }
             split = flb_utils_split(prop->val, ' ', 1);
             if (mk_list_size(split) != 2) {
-                flb_error("[%s] invalid rename_key parameters, expects 'KEY VALUE'",
-                          PLUGIN_NAME);
+                flb_error
+                    ("[%s] invalid rename_key parameters, expects 'KEY VALUE'",
+                     PLUGIN_NAME);
                 flb_free(mod_record);
                 flb_utils_split_free(split);
                 continue;
             }
             /* Get first value (field) */
-            sentry = mk_list_entry_first(split, struct flb_split_entry, _head);
+            sentry =
+                mk_list_entry_first(split, struct flb_split_entry, _head);
             mod_record->key = flb_strndup(sentry->value, sentry->len);
             mod_record->key_len = sentry->len;
 
@@ -93,7 +95,8 @@ static int configure(struct record_modifier_ctx *ctx,
             mod_record->val = flb_strndup(sentry->value, sentry->len);
             mod_record->val_len = sentry->len;
 
-            flb_info("rename_keys property kv: %s / %s", mod_record->key, mod_record->val);
+            flb_info("rename_keys property kv: %s / %s", mod_record->key,
+                     mod_record->val);
 
             flb_utils_split_free(split);
             mk_list_add(&mod_record->_head, &ctx->rename_keys);
@@ -107,14 +110,16 @@ static int configure(struct record_modifier_ctx *ctx,
             }
             split = flb_utils_split(prop->val, ' ', 1);
             if (mk_list_size(split) != 2) {
-                flb_error("[%s] invalid record parameters, expects 'KEY VALUE'",
-                          PLUGIN_NAME);
+                flb_error
+                    ("[%s] invalid record parameters, expects 'KEY VALUE'",
+                     PLUGIN_NAME);
                 flb_free(mod_record);
                 flb_utils_split_free(split);
                 continue;
             }
             /* Get first value (field) */
-            sentry = mk_list_entry_first(split, struct flb_split_entry, _head);
+            sentry =
+                mk_list_entry_first(split, struct flb_split_entry, _head);
             mod_record->key = flb_strndup(sentry->value, sentry->len);
             mod_record->key_len = sentry->len;
 
@@ -129,15 +134,18 @@ static int configure(struct record_modifier_ctx *ctx,
     }
 
     if (ctx->rename_keys_num > 0 && ctx->whitelist_keys_num > 0) {
-        flb_error("rename_keys and whitelist_keys are exclusive with each other.");
+        flb_error
+            ("rename_keys and whitelist_keys are exclusive with each other.");
         return -1;
     }
     if (ctx->remove_keys_num > 0 && ctx->whitelist_keys_num > 0) {
-        flb_error("remove_keys and whitelist_keys are exclusive with each other.");
+        flb_error
+            ("remove_keys and whitelist_keys are exclusive with each other.");
         return -1;
     }
     if (ctx->remove_keys_num > 0 && ctx->rename_keys_num > 0) {
-        flb_error("remove_keys and rename_keys are exclusive with each other.");
+        flb_error
+            ("remove_keys and rename_keys are exclusive with each other.");
         return -1;
     }
     return 0;
@@ -151,24 +159,24 @@ static int delete_list(struct record_modifier_ctx *ctx)
     struct modifier_record *record;
 
     mk_list_foreach_safe(head, tmp, &ctx->remove_keys) {
-        key = mk_list_entry(head, struct modifier_key,  _head);
+        key = mk_list_entry(head, struct modifier_key, _head);
         mk_list_del(&key->_head);
         flb_free(key);
     }
     mk_list_foreach_safe(head, tmp, &ctx->whitelist_keys) {
-        key = mk_list_entry(head, struct modifier_key,  _head);
+        key = mk_list_entry(head, struct modifier_key, _head);
         mk_list_del(&key->_head);
         flb_free(key);
     }
     mk_list_foreach_safe(head, tmp, &ctx->rename_keys) {
-        record = mk_list_entry(head, struct modifier_record,  _head);
+        record = mk_list_entry(head, struct modifier_record, _head);
         flb_free(record->key);
         flb_free(record->val);
         mk_list_del(&record->_head);
         flb_free(record);
     }
     mk_list_foreach_safe(head, tmp, &ctx->records) {
-        record = mk_list_entry(head, struct modifier_record,  _head);
+        record = mk_list_entry(head, struct modifier_record, _head);
         flb_free(record->key);
         flb_free(record->val);
         mk_list_del(&record->_head);
@@ -179,9 +187,9 @@ static int delete_list(struct record_modifier_ctx *ctx)
 }
 
 
-static int cb_modifier_init(struct flb_filter_instance *f_ins,
-                        struct flb_config *config,
-                        void *data)
+static int
+cb_modifier_init(struct flb_filter_instance *f_ins,
+                 struct flb_config *config, void *data)
 {
     struct record_modifier_ctx *ctx = NULL;
 
@@ -196,7 +204,7 @@ static int cb_modifier_init(struct flb_filter_instance *f_ins,
     mk_list_init(&ctx->whitelist_keys);
     mk_list_init(&ctx->rename_keys);
 
-    if ( configure(ctx, f_ins) < 0 ){
+    if (configure(ctx, f_ins) < 0) {
         delete_list(ctx);
         return -1;
     }
@@ -206,8 +214,9 @@ static int cb_modifier_init(struct flb_filter_instance *f_ins,
     return 0;
 }
 
-static int make_bool_map(struct record_modifier_ctx *ctx, msgpack_object *map,
-                         bool_map_t *bool_map)
+static int
+make_bool_map(struct record_modifier_ctx *ctx, msgpack_object * map,
+              bool_map_t * bool_map)
 {
     struct mk_list *tmp;
     struct mk_list *head;
@@ -225,87 +234,94 @@ static int make_bool_map(struct record_modifier_ctx *ctx, msgpack_object *map,
 
     char is_to_rename = FLB_FALSE;
 
-    for (i=0; i<map_num; i++) {
+    for (i = 0; i < map_num; i++) {
         bool_map[i] = TO_BE_REMAINED;
     }
-    bool_map[map_num] = TAIL_OF_ARRAY;/* tail of map */
+    bool_map[map_num] = TAIL_OF_ARRAY;  /* tail of map */
 
     if (ctx->remove_keys_num > 0) {
         check = &(ctx->remove_keys);
         is_to_delete = FLB_TRUE;
     }
-    else if(ctx->whitelist_keys_num > 0) {
+    else if (ctx->whitelist_keys_num > 0) {
         check = &(ctx->whitelist_keys);
         is_to_delete = FLB_FALSE;
     }
-    else if(ctx->rename_keys_num > 0) {
-	flb_debug("Configured for renaming keys");
+    else if (ctx->rename_keys_num > 0) {
+        flb_debug("Configured for renaming keys");
         check = &(ctx->rename_keys);
         is_to_delete = FLB_FALSE;
-	is_to_rename = FLB_TRUE;;
+        is_to_rename = FLB_TRUE;;
     }
 
-    if (check != NULL && is_to_rename){
+    if (check != NULL && is_to_rename) {
         kv = map->via.map.ptr;
-        for(i=0; i<map_num; i++){
-            key = &(kv+i)->key;
+        for (i = 0; i < map_num; i++) {
+            key = &(kv + i)->key;
             result = FLB_FALSE;
 
             mk_list_foreach_safe(head, tmp, check) {
-                mod_record = mk_list_entry(head, struct modifier_record,  _head);
-                if (key->via.bin.size != mod_record->key_len &&
-                    key->via.str.size != mod_record->key_len) {
-		    flb_debug("No match key %s against %s/%s ", key->via.str.ptr, mod_record->key, mod_record->val);
+                mod_record =
+                    mk_list_entry(head, struct modifier_record, _head);
+                if (key->via.bin.size != mod_record->key_len
+                    && key->via.str.size != mod_record->key_len) {
+                    flb_debug("No match key %s against %s/%s ",
+                              key->via.str.ptr, mod_record->key,
+                              mod_record->val);
                     continue;
                 }
                 if (key->type == MSGPACK_OBJECT_BIN &&
-                     !strncasecmp(key->via.bin.ptr, mod_record->key,
+                    !strncasecmp(key->via.bin.ptr, mod_record->key,
                                  mod_record->key_len)) {
-		    flb_debug("Matched key %s against %s/%s ", key->via.bin.ptr, mod_record->key, mod_record->val);
+                    flb_debug("Matched key %s against %s/%s ",
+                              key->via.bin.ptr, mod_record->key,
+                              mod_record->val);
                     result = FLB_TRUE;
                     break;
-		}
-		else if (key->type == MSGPACK_OBJECT_STR &&
-                     !strncasecmp(key->via.str.ptr, mod_record->key,
-                                 mod_record->key_len))
-		{
-		    flb_debug("Matched key %s against %s/%s ", key->via.str.ptr, mod_record->key, mod_record->val);
+                }
+                else if (key->type == MSGPACK_OBJECT_STR &&
+                         !strncasecmp(key->via.str.ptr, mod_record->key,
+                                      mod_record->key_len)) {
+                    flb_debug("Matched key %s against %s/%s ",
+                              key->via.str.ptr, mod_record->key,
+                              mod_record->val);
                     result = FLB_TRUE;
                     break;
-                } else {
-		    flb_debug("No match for key %s against record %s", key->via.str.ptr, mod_record->key);
-		}
+                }
+                else {
+                    flb_debug("No match for key %s against record %s",
+                              key->via.str.ptr, mod_record->key);
+                }
             }
-	    if ((result != FLB_TRUE) && (is_to_rename == FLB_TRUE)) {
-		flb_debug("Rename operation matched");
+            if ((result != FLB_TRUE) && (is_to_rename == FLB_TRUE)) {
+                flb_debug("Rename operation matched");
                 bool_map[i] = TO_BE_RENAMED;
-	    }
+            }
         }
     }
-    else if (check != NULL){
+    else if (check != NULL) {
         kv = map->via.map.ptr;
-        for(i=0; i<map_num; i++){
-            key = &(kv+i)->key;
+        for (i = 0; i < map_num; i++) {
+            key = &(kv + i)->key;
             result = FLB_FALSE;
 
             mk_list_foreach_safe(head, tmp, check) {
-                mod_key = mk_list_entry(head, struct modifier_key,  _head);
+                mod_key = mk_list_entry(head, struct modifier_key, _head);
                 if (key->via.bin.size != mod_key->key_len &&
                     key->via.str.size != mod_key->key_len) {
                     continue;
                 }
                 if ((key->type == MSGPACK_OBJECT_BIN &&
                      !strncasecmp(key->via.bin.ptr, mod_key->key,
-                                 mod_key->key_len)) ||
+                                  mod_key->key_len)) ||
                     (key->type == MSGPACK_OBJECT_STR &&
                      !strncasecmp(key->via.str.ptr, mod_key->key,
-                                 mod_key->key_len))
-                    ) {
+                                  mod_key->key_len))) {
                     result = FLB_TRUE;
                     break;
-		}
+                }
             }
-	    if (result == is_to_delete) {
+            if (result == is_to_delete) {
                 bool_map[i] = TO_BE_REMOVED;
                 ret--;
             }
@@ -313,22 +329,22 @@ static int make_bool_map(struct record_modifier_ctx *ctx, msgpack_object *map,
         }
     }
 
-    return ret; // number of items in the map after operations have been applied
+    return ret;                 // number of items in the map after operations have been applied
 }
 
-static int cb_modifier_filter(void *data, size_t bytes,
-                          char *tag, int tag_len,
-                          void **out_buf, size_t *out_size,
-                          struct flb_filter_instance *f_ins,
-                          void *context,
-                          struct flb_config *config)
+static int
+cb_modifier_filter(void *data, size_t bytes,
+                   char *tag, int tag_len,
+                   void **out_buf, size_t * out_size,
+                   struct flb_filter_instance *f_ins,
+                   void *context, struct flb_config *config)
 {
     struct record_modifier_ctx *ctx = context;
     char is_modified = FLB_FALSE;
     size_t off = 0;
     int i;
-    int removed_map_num  = 0;
-    int map_num          = 0;
+    int removed_map_num = 0;
+    int map_num = 0;
     bool_map_t bool_map[128];
     (void) f_ins;
     (void) config;
@@ -337,7 +353,7 @@ static int cb_modifier_filter(void *data, size_t bytes,
     msgpack_sbuffer tmp_sbuf;
     msgpack_packer tmp_pck;
     msgpack_unpacked result;
-    msgpack_object  *obj;
+    msgpack_object *obj;
     msgpack_object_kv *kv;
     struct mk_list *tmp;
     struct mk_list *head;
@@ -360,9 +376,9 @@ static int cb_modifier_filter(void *data, size_t bytes,
         /* grep keys */
         if (obj->type == MSGPACK_OBJECT_MAP) {
             map_num = obj->via.map.size;
-            removed_map_num = make_bool_map(ctx, obj,
-                                            bool_map);
-        } else {
+            removed_map_num = make_bool_map(ctx, obj, bool_map);
+        }
+        else {
             continue;
         }
 
@@ -380,14 +396,14 @@ static int cb_modifier_filter(void *data, size_t bytes,
 
         msgpack_pack_map(&tmp_pck, removed_map_num);
         kv = obj->via.map.ptr;
-        for(i=0; bool_map[i] != TAIL_OF_ARRAY; i++) {
+        for (i = 0; bool_map[i] != TAIL_OF_ARRAY; i++) {
             if (bool_map[i] == TO_BE_REMAINED) {
-                msgpack_pack_object(&tmp_pck, (kv+i)->key);
-                msgpack_pack_object(&tmp_pck, (kv+i)->val);
+                msgpack_pack_object(&tmp_pck, (kv + i)->key);
+                msgpack_pack_object(&tmp_pck, (kv + i)->val);
             }
-	    else if (bool_map[i] == TO_BE_RENAMED) {
-                msgpack_pack_object(&tmp_pck, (kv+i)->key);
-                msgpack_pack_object(&tmp_pck, (kv+i)->val);
+            else if (bool_map[i] == TO_BE_RENAMED) {
+                msgpack_pack_object(&tmp_pck, (kv + i)->key);
+                msgpack_pack_object(&tmp_pck, (kv + i)->val);
             }
         }
 
@@ -395,13 +411,13 @@ static int cb_modifier_filter(void *data, size_t bytes,
         if (ctx->records_num > 0) {
             is_modified = FLB_TRUE;
             mk_list_foreach_safe(head, tmp, &ctx->records) {
-                mod_rec = mk_list_entry(head, struct modifier_record,  _head);
+                mod_rec = mk_list_entry(head, struct modifier_record, _head);
                 msgpack_pack_str(&tmp_pck, mod_rec->key_len);
-                msgpack_pack_str_body(&tmp_pck,
-                                      mod_rec->key, mod_rec->key_len);
+                msgpack_pack_str_body(&tmp_pck, mod_rec->key,
+                                      mod_rec->key_len);
                 msgpack_pack_str(&tmp_pck, mod_rec->val_len);
-                msgpack_pack_str_body(&tmp_pck,
-                                      mod_rec->val, mod_rec->val_len);
+                msgpack_pack_str_body(&tmp_pck, mod_rec->val,
+                                      mod_rec->val_len);
             }
         }
     }
@@ -414,7 +430,7 @@ static int cb_modifier_filter(void *data, size_t bytes,
     }
 
     /* link new buffers */
-    *out_buf  = tmp_sbuf.data;
+    *out_buf = tmp_sbuf.data;
     *out_size = tmp_sbuf.size;
     return FLB_FILTER_MODIFIED;
 }
@@ -431,10 +447,10 @@ static int cb_modifier_exit(void *data, struct flb_config *config)
 }
 
 struct flb_filter_plugin filter_record_modifier_plugin = {
-    .name         = "record_modifier",
-    .description  = "modify record",
-    .cb_init      = cb_modifier_init,
-    .cb_filter    = cb_modifier_filter,
-    .cb_exit      = cb_modifier_exit,
-    .flags        = 0
+    .name = "record_modifier",
+    .description = "modify record",
+    .cb_init = cb_modifier_init,
+    .cb_filter = cb_modifier_filter,
+    .cb_exit = cb_modifier_exit,
+    .flags = 0
 };

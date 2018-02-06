@@ -20,21 +20,24 @@
 #ifndef FLB_FILTER_RECORD_MODIFIER_H
 #define FLB_FILTER_RECORD_MODIFIER_H
 
-struct modifier_record {
+struct modifier_record
+{
     char *key;
     char *val;
-    int  key_len;
-    int  val_len;
+    int key_len;
+    int val_len;
     struct mk_list _head;
 };
 
-struct modifier_key {
+struct modifier_key
+{
     char *key;
-    int   key_len;
+    int key_len;
     struct mk_list _head;
 };
 
-struct record_modifier_ctx {
+struct record_modifier_ctx
+{
     int records_num;
     int remove_keys_num;
     int whitelist_keys_num;
@@ -45,7 +48,8 @@ struct record_modifier_ctx {
     struct mk_list rename_keys;
 };
 
-typedef enum {
+typedef enum
+{
     TO_BE_REMOVED = 0,
     TO_BE_REMAINED = 1,
     TAIL_OF_ARRAY = 2,
