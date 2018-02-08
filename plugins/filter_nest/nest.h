@@ -20,16 +20,11 @@
 #ifndef FLB_FILTER_NEST_H
 #define FLB_FILTER_NEST_H
 
-struct nest_ctx {
-    struct mk_list rules;
-};
-
-struct nest_rule {
-    int type;
-    char *field;
-    char *regex;
-    regex_t match;
-    struct mk_list _head;
+struct filter_nest_ctx {
+    char   *target_nest_key_name;
+    int    target_nest_key_name_len;
+    char   *regex_key_name;
+    int    regex_key_name_len;
 };
 
 #endif
