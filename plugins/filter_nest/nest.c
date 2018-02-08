@@ -31,24 +31,82 @@
 
 #include "nest.h"
 
+static int msgpackobj2char(msgpack_object *obj,
+                           char **ret_char, int *ret_char_size)
+{
+    int ret = -1;
+
+    if (obj->type == MSGPACK_OBJECT_STR) {
+        *ret_char      = (char*)obj->via.str.ptr;
+        *ret_char_size = obj->via.str.size;
+        ret = 0;
+    }
+    else if (obj->type == MSGPACK_OBJECT_BIN) {
+        *ret_char      = (char*)obj->via.bin.ptr;
+        *ret_char_size = obj->via.bin.size;
+        ret = 0;
+    }
+
+    return ret;
+}
+
+static int configure(struct filter_nest_ctx *ctx,
+                     struct flb_filter_instance *f_ins,
+                     struct flb_config *config)
+{
+    int ret;
+    struct flb_config_prop *prop = NULL;
+    char *tmp;
+
+    ctx->target_nest_key_name = NULL;
+    ctx->regex_key_name = NULL;
+
+    /* Nest key name */
+    tmp = flb_filter_get_property("target_nest_key", f_ins);
+    if (tmp) {
+        ctx->target_nest_key_name = flb_strdup(tmp);
+        ctx->target_nest_key_name_len = strlen(tmp);
+    } else {
+        flb_error("[filter_parser] \"target_nest_key\" is missing\n");
+        return -1;
+    }
+
+    /* Regex key name */
+    tmp = flb_filter_get_property("regex_key", f_ins);
+    if (tmp) {
+        ctx->regex_key_name = flb_strdup(tmp);
+        ctx->regex_key_name_len = strlen(tmp);
+    } else {
+        flb_error("[filter_parser] \"regex_key\" is missing\n");
+        return -1;
+    }
+
+    return 0;
+}
+
+
 static int cb_nest_init(struct flb_filter_instance *f_ins,
                         struct flb_config *config,
                         void *data)
 {
-    int ret;
-    struct nest_ctx *ctx;
+    int ret = 0;
+    struct filter_nest_ctx *ctx;
 
     /* Create context */
-    ctx = flb_malloc(sizeof(struct nest_ctx));
+    ctx = flb_malloc(sizeof(struct filter_nest_ctx));
     if (!ctx) {
         flb_errno();
         return -1;
     }
-    mk_list_init(&ctx->rules);
+
+    if ( configure(ctx, f_ins, config) < 0 ){
+        flb_free(ctx);
+        return -1;
+    }
 
     /* Set our context */
     flb_filter_set_context(f_ins, ctx);
-    return 0;
+    return ret;
 }
 
 static int cb_nest_filter(void *data, size_t bytes,
@@ -73,6 +131,8 @@ static int cb_nest_filter(void *data, size_t bytes,
     /* Create temporal msgpack buffer */
     msgpack_sbuffer_init(&tmp_sbuf);
     msgpack_packer_init(&tmp_pck, &tmp_sbuf, msgpack_sbuffer_write);
+
+
 
     /* Iterate each item array and apply rules */
     msgpack_unpacked_init(&result);
