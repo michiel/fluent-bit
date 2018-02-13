@@ -61,8 +61,8 @@ void flb_test_filter_nest_single(void)
 
     ret = flb_filter_set(ctx, filter_ffd,
         "Match", "*",
-        "Key_pattern", "to_nest",
-        "Nest_key", "nested_key",
+        "Wildcard", "to_nest",
+        "Nest_under", "nested_key",
         NULL);
 
     TEST_CHECK(ret == 0);

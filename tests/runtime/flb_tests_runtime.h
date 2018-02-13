@@ -2,7 +2,7 @@
 
 /*  Fluent Bit
  *  ==========
- *  Copyright (C) 2015-2018 Treasure Data Inc.
+ *  Copyright (C) 2015-2017 Treasure Data Inc.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -17,14 +17,9 @@
  *  limitations under the License.
  */
 
-#ifndef FLB_FILTER_NEST_H
-#define FLB_FILTER_NEST_H
+#ifndef FLB_TESTS_RUNTIME_H
+#define FLB_TESTS_RUNTIME_H
 
-struct filter_nest_ctx {
-    char   *nest_under_key;
-    int    nest_under_key_len;
-    char   *key_wildcard;
-    int    key_wildcard_len;
-};
+#include "../lib/acutest/acutest.h"
 
 #endif
