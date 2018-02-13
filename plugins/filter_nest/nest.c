@@ -37,14 +37,14 @@ static int configure(struct filter_nest_ctx *ctx,
 {
     char *tmp;
 
-    ctx->nest_under_key = NULL;
-    ctx->key_wildcard = NULL;
+    ctx->nesting_key = NULL;
+    ctx->wildcard = NULL;
 
     /* Nest key name */
     tmp = flb_filter_get_property("Nest_under", f_ins);
     if (tmp) {
-        ctx->nest_under_key = flb_strdup(tmp);
-        ctx->nest_under_key_len = strlen(tmp);
+        ctx->nesting_key = flb_strdup(tmp);
+        ctx->nesting_key_len = strlen(tmp);
     } else {
         flb_error("[filter_parser] Key \"Nest_under\" is missing\n");
         return -1;
@@ -53,10 +53,18 @@ static int configure(struct filter_nest_ctx *ctx,
     /* Wildcard key name */
     tmp = flb_filter_get_property("Wildcard", f_ins);
     if (tmp) {
-        ctx->key_wildcard = flb_strdup(tmp);
-        ctx->key_wildcard_len = strlen(tmp);
+        ctx->wildcard = flb_strdup(tmp);
+        ctx->wildcard_len = strlen(tmp);
+
+        if (ctx->wildcard[ctx->wildcard_len - 1] == '*') {
+          ctx->wildcard_is_dynamic = FLB_TRUE;
+          ctx->wildcard_len--;
+        } else {
+          ctx->wildcard_is_dynamic = FLB_FALSE;
+        }
+
     } else {
-        flb_error("[filter_parser] Key \"Regex\" is missing\n");
+        flb_error("[filter_parser] Key \"Wildcard\" is missing\n");
         return -1;
     }
 
@@ -78,6 +86,10 @@ static inline msgpack_object nest_data(msgpack_object map, struct filter_nest_ct
     msgpack_object *k;
     msgpack_object *v;
     struct mk_list *head;
+
+    int keys_to_nest = 0;
+    int keys_to_keep = 0;
+    bool matched = false;
 
     msgpack_object map_out;
 
@@ -111,10 +123,10 @@ static inline msgpack_object nest_data(msgpack_object map, struct filter_nest_ct
 
         flb_debug("XX nest_data : iteration %d - key is %s\n", i, key);
 
-        if (strncmp(key, ctx->nest_under_key, klen) == 0) {
+        if (strncmp(key, ctx->nesting_key, klen) == 0) {
+            flb_debug("[filter_nest] (scan) Existing nested map key found '%s', checking value ..", key);
             v = &map.via.map.ptr[i].val;
 
-            flb_debug("[filter_nest] (scan) Existing nested map key found '%s', checking value ..", key);
             if (v->type != MSGPACK_OBJECT_ARRAY) {
               flb_error("[filter_nest] (scan) Nest_to key '%s' found but it is not a map, aborting", key);
             } else {
@@ -125,6 +137,10 @@ static inline msgpack_object nest_data(msgpack_object map, struct filter_nest_ct
             }
 
             break;
+        } else if (strncmp(key, ctx->wildcard, klen) == 0) {
+          keys_to_nest++;
+        } else {
+          keys_to_keep++;
         }
 
         k = NULL;
@@ -149,20 +165,32 @@ static inline msgpack_object nest_data(msgpack_object map, struct filter_nest_ct
 
         flb_debug("nest_data : key is %s\n", key);
 
-        if (strncmp(key, ctx->key_wildcard, klen) == 0) {
-            flb_debug("[filter_nest] Houston we have a match for key '%s' to nest '%s'", 
-                ctx->key_wildcard,
-                ctx->nest_under_key
-                );
+        matched = false;
+        if (ctx->wildcard_is_dynamic) {
+          // this will positively match "ABC123" with wildcard "ABC*" 
+          matched = (strncmp(key, ctx->wildcard, ctx->wildcard_len) == 0);
+        } else {
+          // this will positively match "ABC" with wildcard "ABC" 
+          matched = (
+              (ctx->wildcard_len == klen) &&
+              (strncmp(key, ctx->wildcard, ctx->wildcard_len) == 0)
+             );
+        }
+
+        if (matched) {
+            flb_debug("[filter_nest] Houston we have a match for key '%s' to nest '%s'", ctx->wildcard, ctx->nesting_key);
             // Add to nest_map
+            msgpack_pack_object(&nest_packer, map.via.map.ptr[i]);
         } else {
             // Add to map_out
+            msgpack_pack_object(&ret_packer, map.via.map.ptr[i]);
         }
 
         k = NULL;
     }
 
     // Add nest_map to map_out
+    msgpack_pack_object(&ret_packer, map_out);
 
     return map_out;
 }
@@ -216,8 +244,8 @@ static int cb_nest_filter(void *data, size_t bytes,
     msgpack_packer_init(&new_pck, &new_sbuf, msgpack_sbuffer_write);
 
     flb_debug("[filter_nest] Operating nest filter. Moving keys matching '%s' to '%s'", 
-        ctx->key_wildcard,
-        ctx->nest_under_key
+        ctx->wildcard,
+        ctx->nesting_key
         );
 
     // Records come in in  the format,

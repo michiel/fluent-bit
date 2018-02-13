@@ -21,10 +21,11 @@
 #define FLB_FILTER_NEST_H
 
 struct filter_nest_ctx {
-    char   *nest_under_key;
-    int    nest_under_key_len;
-    char   *key_wildcard;
-    int    key_wildcard_len;
+    char   *nesting_key;
+    int    nesting_key_len;
+    char   *wildcard;
+    int    wildcard_len;
+    bool   wildcard_is_dynamic;
 };
 
 #endif
