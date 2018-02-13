@@ -31,6 +31,16 @@
 
 #include "nest.h"
 
+static void pack_string(msgpack_packer *packer, const char *str) {
+	if(str == NULL) {
+		msgpack_pack_nil(packer);
+	} else {
+		int len = (int) strlen(str);
+		msgpack_pack_str(packer, len);
+		msgpack_pack_str_body(packer, str, len);
+	}
+}
+
 static int configure(struct filter_nest_ctx *ctx,
                      struct flb_filter_instance *f_ins,
                      struct flb_config *config)
@@ -71,11 +81,10 @@ static int configure(struct filter_nest_ctx *ctx,
     return 0;
 }
 
-static inline int clone_map(msgpack_packer *packer, msgpack_object_array *from, msgpack_object *to) {
-  return 0;
-}
-
-static inline msgpack_object nest_data(msgpack_object map, struct filter_nest_ctx *ctx)
+static inline void nest_data(
+    msgpack_packer *packer,
+    msgpack_object map,
+    struct filter_nest_ctx *ctx)
 {
 
     int i;
@@ -87,27 +96,15 @@ static inline msgpack_object nest_data(msgpack_object map, struct filter_nest_ct
     msgpack_object *v;
     struct mk_list *head;
 
-    int keys_to_nest = 0;
-    int keys_to_keep = 0;
+    size_t keys_to_nest = 0;
+    size_t keys_to_keep = 0;
     bool matched = false;
-
-    msgpack_object map_out;
-
-    msgpack_packer ret_packer;
-    msgpack_sbuffer* ret_buffer = msgpack_sbuffer_new();
-    msgpack_packer_init(&ret_packer, &ret_buffer, msgpack_sbuffer_write);
 
     msgpack_packer nest_packer;
     msgpack_sbuffer* nest_buffer = msgpack_sbuffer_new();
     msgpack_packer_init(&nest_packer, &nest_buffer, msgpack_sbuffer_write);
 
-    /* Iterate each item array to see if the nest key exists
-     *  - Create a new map if it does not exist
-     *  - Assign the reference to the existing or new map, depending
-     *  - Error out if the key exists and is not a map
-     * */
-
-    // Search for an existing map
+    // Do an inventory of the map
     for (i = 0; i < map.via.map.size; i++) {
         k = &map.via.map.ptr[i].key;
 
@@ -121,7 +118,7 @@ static inline msgpack_object nest_data(msgpack_object map, struct filter_nest_ct
             continue;
         }
 
-        flb_debug("XX nest_data : iteration %d - key is %s\n", i, key);
+        flb_debug("XX nest_data : inventory iteration %d - key is %s\n", i, key);
 
         if (strncmp(key, ctx->nesting_key, klen) == 0) {
             flb_debug("[filter_nest] (scan) Existing nested map key found '%s', checking value ..", key);
@@ -131,12 +128,8 @@ static inline msgpack_object nest_data(msgpack_object map, struct filter_nest_ct
               flb_error("[filter_nest] (scan) Nest_to key '%s' found but it is not a map, aborting", key);
             } else {
               flb_info("[filter_nest] (scan) Nest_to key '%s'", key);
-              //
               // clone into nest_map
-              //
             }
-
-            break;
         } else if (strncmp(key, ctx->wildcard, klen) == 0) {
           keys_to_nest++;
         } else {
@@ -146,11 +139,15 @@ static inline msgpack_object nest_data(msgpack_object map, struct filter_nest_ct
         k = NULL;
     }
 
+    keys_to_nest++; // for the nest key
+
+    // msgpack_pack_map(packer, keys_to_keep);
+    // msgpack_pack_map(&nest_packer, keys_to_nest);
+
     // Create the new map from the previous values
     //  - Add wildcard matches to nest_map
     //  - Add others to map_out
     for (i = 0; i < map.via.map.size; i++) {
-        flb_debug("nest_data : iterating # %d", i);
         k = &map.via.map.ptr[i].key;
 
         if (k->type == MSGPACK_OBJECT_BIN) {
@@ -163,7 +160,7 @@ static inline msgpack_object nest_data(msgpack_object map, struct filter_nest_ct
             continue;
         }
 
-        flb_debug("nest_data : key is %s\n", key);
+        // flb_debug("XX nest_data II : iteration %d - key is %s\n", i, key);
 
         matched = false;
         if (ctx->wildcard_is_dynamic) {
@@ -178,21 +175,30 @@ static inline msgpack_object nest_data(msgpack_object map, struct filter_nest_ct
         }
 
         if (matched) {
-            flb_debug("[filter_nest] Houston we have a match for key '%s' to nest '%s'", ctx->wildcard, ctx->nesting_key);
-            // Add to nest_map
-            msgpack_pack_object(&nest_packer, map.via.map.ptr[i]);
+            flb_debug("[filter_nest] We have a match for key '%s' to nest '%s'", ctx->wildcard, ctx->nesting_key);
+            pack_string(&nest_packer, key);
+            pack_string(&nest_packer, key); // XX pack value
+
         } else {
-            // Add to map_out
-            msgpack_pack_object(&ret_packer, map.via.map.ptr[i]);
+            flb_debug("[filter_nest] No match, adding to top-level");
+            
+            pack_string(packer, key);
+            pack_string(packer, key); // XX pack value
         }
+
+        pack_string(packer, ctx->nesting_key);
+        pack_string(packer, ctx->nesting_key); // XX pack nest_map
 
         k = NULL;
     }
 
-    // Add nest_map to map_out
-    msgpack_pack_object(&ret_packer, map_out);
+}
 
-    return map_out;
+static void nest_map_data(msgpack_packer *packer,
+    msgpack_object_map *map, 
+    struct filter_nest_ctx *ctx) 
+{
+
 }
 
 static int cb_nest_init(struct flb_filter_instance *f_ins,
@@ -231,17 +237,13 @@ static int cb_nest_filter(void *data, size_t bytes,
     (void) f_ins;
     (void) config;
 
-    // This holds our new, nested object
-
-    msgpack_sbuffer new_sbuf;
-    msgpack_packer new_pck;
-
     struct filter_nest_ctx *ctx = context;
 
-    // Create temporary msgpack buffer
+    msgpack_sbuffer sbuffer;
+    msgpack_sbuffer_init(&sbuffer);
 
-    msgpack_sbuffer_init(&new_sbuf);
-    msgpack_packer_init(&new_pck, &new_sbuf, msgpack_sbuffer_write);
+    msgpack_packer packer;
+    msgpack_packer_init(&packer, &sbuffer, msgpack_sbuffer_write);
 
     flb_debug("[filter_nest] Operating nest filter. Moving keys matching '%s' to '%s'", 
         ctx->wildcard,
@@ -250,8 +252,10 @@ static int cb_nest_filter(void *data, size_t bytes,
 
     // Records come in in  the format,
     //
-    // [ TIMESTAMP, { K1 :V1, K2: V2 ...} ], 
-    // [ TIMESTAMP, { K1 :V1, K2: V2 ...} ]
+    // [ TIMESTAMP, { K1:V1, K2:V2 ...} ], 
+    // [ TIMESTAMP, { K1:V1, K2:V2 ...} ]
+    // ex,
+    // [1123123, {"Mem.total"=>4050908, "Mem.used"=>476576, "Mem.free"=>3574332 } ]
     //
     // Loop is,
     //  - Check object type 
@@ -262,34 +266,35 @@ static int cb_nest_filter(void *data, size_t bytes,
 
     msgpack_unpacked_init(&result);
     while (msgpack_unpack_next(&result, data, bytes, &off)) {
-      flb_debug("[filter_nest] Processing a record");
         if (result.data.type == MSGPACK_OBJECT_ARRAY) {
-          flb_debug("[filter_nest] Record is an object array");
+          flb_debug("[filter_nest] Record is an array");
+          msgpack_object_print(stdout, result.data);
 
           // 0 = Timestamp
           // 1 = Embedded object
           map  = result.data.via.array.ptr[1];
-
-          // Process the embedded object into a nested one, add that to our new array
-          msgpack_pack_object(&new_pck, nest_data(map, context));
+          // nest_data(&packer, map, context);
 
         } else {
-          flb_debug("[filter_nest] Record is a NOT or map or array");
+          flb_debug("[filter_nest] Record is NOT an array, skipping");
+          msgpack_pack_object(&packer, result.data);
           continue;
         }
     }
     msgpack_unpacked_destroy(&result);
 
-    *out_buf   = new_sbuf.data;
-    *out_size = new_sbuf.size;
+    *out_buf   = sbuffer.data;
+    *out_size = sbuffer.size;
 
     return FLB_FILTER_MODIFIED;
 }
 
 static int cb_nest_exit(void *data, struct flb_config *config)
 {
-    struct nest_ctx *ctx = data;
+    struct filter_nest_ctx *ctx = data;
 
+    flb_free(ctx->nesting_key);
+    flb_free(ctx->wildcard);
     flb_free(ctx);
     return 0;
 }
