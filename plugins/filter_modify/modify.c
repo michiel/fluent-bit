@@ -120,7 +120,8 @@ static int setup(struct filter_modify_ctx *ctx,
     return 0;
 }
 
-static inline bool kv_key_matches(msgpack_object_kv * kv, struct modify_rule * rule)
+static inline bool kv_key_matches(msgpack_object_kv * kv,
+                                  struct modify_rule *rule)
 {
 
     char *key;
@@ -144,13 +145,14 @@ static inline bool kv_key_matches(msgpack_object_kv * kv, struct modify_rule * r
         );
 }
 
-static inline bool not_kv_key_matches(msgpack_object_kv * kv, struct modify_rule * rule)
+static inline bool not_kv_key_matches(msgpack_object_kv * kv,
+                                      struct modify_rule *rule)
 {
     return !kv_key_matches(kv, rule);
 }
 
 static inline int map_count_records_matching_rule(msgpack_object * map,
-                                                  struct modify_rule * rule)
+                                                  struct modify_rule *rule)
 {
     int i;
     int count = 0;
