@@ -1,9 +1,6 @@
 /* -*- Mode: C; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*  Fluent Bit
- *  ==========
- *  Copyright (C) 2015-2018 Treasure Data Inc.
- *
+/*
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
  *  You may obtain a copy of the License at
@@ -20,12 +17,13 @@
 #ifndef FLB_FILTER_NEST_H
 #define FLB_FILTER_NEST_H
 
-struct filter_nest_ctx {
-    char   *nesting_key;
-    int    nesting_key_len;
-    char   *wildcard;
-    int    wildcard_len;
-    bool   wildcard_is_dynamic;
+struct filter_nest_ctx
+{
+    char *nesting_key;
+    int nesting_key_len;
+    char *wildcard;
+    int wildcard_len;
+    bool wildcard_is_dynamic;
 };
 
 #endif
