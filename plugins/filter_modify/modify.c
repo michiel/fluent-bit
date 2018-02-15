@@ -113,16 +113,14 @@ static void helper_pack_string(msgpack_packer * packer, const char *str)
 }
 
 static inline int map_count_records_matching_rule(msgpack_object * map,
-                            modify_rule* rule,
-                            bool(*f) (msgpack_object_kv * kv,
-                                      modify_rule* rule)
+                            modify_rule* rule
     )
 {
     int i;
     int count = 0;
 
     for (i = 0; i < map->via.map.size; i++) {
-        if ((*f) (&map->via.map.ptr[i], rule)) {
+        if (kv_key_matches(map->via.map.ptr[i], rule)) {
             count++;
         }
     }
@@ -161,7 +159,7 @@ static inline bool not_kv_key_matches(msgpack_object_kv * kv,
     return !kv_key_matches(kv, match);
 }
 
-static inline int count_rules_not_matched(msgpack_object * map, struct * mklist rules) 
+static inline int count_rules_not_matched(msgpack_object * map, struct mk_list *rules) 
 {
     struct mk_list *head;
     struct modify_rule *rule;
@@ -178,6 +176,60 @@ static inline int count_rules_not_matched(msgpack_object * map, struct * mklist 
     return counter;
 }
 
+static inline void pack_map_with_rename(
+    msgpack_packer * packer,
+    msgpack_object * map,
+    struct mk_list *rules
+    ) {
+
+    int i;
+    struct mk_list *head;
+    struct modify_rule *rule;
+    struct modify_rule *matched_rule;
+    bool matched;
+
+    for (i = 0; i < map->via.map.size; i++) {
+
+      matched = false;
+
+      mk_list_foreach(head, rules) {
+          rule = mk_list_entry(head, struct modify_rule, _head);
+          if (kv_key_matches(&map->via.map.ptr[i], &rule)) {
+            matched = true;
+            matched_rule = rule;
+          }
+      }
+
+      if (matched) {
+        helper_pack_string(packer, matched_rule->val);
+      } else {
+        msgpack_pack_object(packer, map->via.map.ptr[i].key);
+      }
+      msgpack_pack_object(packer, map->via.map.ptr[i].val);
+
+    }
+}
+
+static inline void pack_map_with_missing_keys(
+    msgpack_packer * packer,
+    msgpack_object * map,
+    struct mk_list *rules
+    ) {
+
+    int i;
+    struct mk_list *head;
+    struct modify_rule *rule;
+    struct modify_rule *matched_rule;
+    bool matched;
+
+    mk_list_foreach(head, rules) {
+        rule = mk_list_entry(head, struct modify_rule, _head);
+        if (map_count_records_matching_rule(map, rule) == 0) {
+          helper_pack_string(packer, matched_rule->key);
+          helper_pack_string(packer, matched_rule->val);
+        }
+    }
+}
 
 static inline void apply_modifying_rules(msgpack_packer * packer,
                                        msgpack_object * root,
