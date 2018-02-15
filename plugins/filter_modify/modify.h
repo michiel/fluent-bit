@@ -17,14 +17,16 @@
 #ifndef FLB_FILTER_MODIFY_H
 #define FLB_FILTER_MODIFY_H
 
-struct filter_modify_ctx {
+struct filter_modify_ctx
+{
     int add_key_rules_cnt;
     int rename_key_rules_cnt;
     struct mk_list add_key_rules;
     struct mk_list rename_key_rules;
 };
 
-struct modify_rule {
+struct modify_rule
+{
     int key_len;
     int val_len;
     char *key;
