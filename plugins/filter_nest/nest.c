@@ -1,22 +1,5 @@
 /* -*- Mode: C; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 
-/*  Fluent Bit
- *  ==========
- *  Copyright (C) 2015-2018 Treasure Data Inc.
- *
- *  Licensed under the Apache License, Version 2.0 (the "License");
- *  you may not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
- */
-
 #include <stdio.h>
 #include <sys/types.h>
 #include <regex.h>
@@ -81,14 +64,6 @@ static void helper_pack_string(msgpack_packer *packer, const char *str) {
   }
 }
 
-static void debug_print_key(msgpack_object_kv *kv) {
-  if (kv->key.type == MSGPACK_OBJECT_STR) {
-    flb_debug("Key is %s\n", kv->key.via.str.ptr);
-  } else {
-    flb_debug("Key is not a string");
-  }
-}
-
 static inline void map_pack_each_if(
     msgpack_packer *packer,
     msgpack_object *map,
@@ -100,14 +75,8 @@ static inline void map_pack_each_if(
 
     for (i = 0; i < map->via.map.size; i++) {
         if ((*f)(&map->via.map.ptr[i], ctx)) {
-          flb_debug("[filter_next].map_pack_each_if : Accepting key,");
-          debug_print_key(&map->via.map.ptr[i]);
-
           msgpack_pack_object(packer, map->via.map.ptr[i].key);
           msgpack_pack_object(packer, map->via.map.ptr[i].val);
-        } else {
-          flb_debug("[filter_next].map_pack_each_if : Rejecting key,");
-          debug_print_key(&map->via.map.ptr[i]);
         }
     }
 }
@@ -135,27 +104,27 @@ static inline bool is_kv_to_nest(
     ) 
 {
 
-  msgpack_object *obj;
   char *key;
   int klen;
 
-  obj = &kv->key;
+  msgpack_object *obj = &kv->key;
 
   if (obj->type == MSGPACK_OBJECT_BIN) {
-    key = (char *) obj->via.bin.ptr;
+    key  = (char *) obj->via.bin.ptr;
     klen = obj->via.bin.size;
   } else if (obj->type == MSGPACK_OBJECT_STR) {
     key  = (char *) obj->via.str.ptr;
     klen = obj->via.str.size;
   } else {
+		// If the key is not something we can match on then we leave it alone
     return false;
   }
 
   if (ctx->wildcard_is_dynamic) {
-    // this will positively match "ABC123" with wildcard "ABC*" 
+    // This will positively match "ABC123" with wildcard "ABC*" 
     return (strncmp(key, ctx->wildcard, ctx->wildcard_len) == 0);
   } else {
-    // this will positively match "ABC" with wildcard "ABC" 
+    // This will positively match "ABC" with wildcard "ABC" 
     return (
         (ctx->wildcard_len == klen) &&
         (strncmp(key, ctx->wildcard, ctx->wildcard_len) == 0)
@@ -188,17 +157,14 @@ static inline void apply_nesting_rules(
     size_t items_to_nest_count = map_count(&map, ctx, &is_kv_to_nest);
     size_t items_toplevel_count = (map.via.map.size - items_to_nest_count + 1);
 
-    flb_debug("[filter_nest].apply_nesting_rules : Top size %d, nest size %d",
+    flb_debug("[filter_nest] Outer map size %d elements, nested map size %d elements",
         items_toplevel_count,
         items_to_nest_count);
 
     // * * Record array item 2/2
     // * * Create a new map with toplevel items +1 for nested map
-    flb_debug("[filter_nest].apply_nesting_rules : Packing top level");
     msgpack_pack_map(packer, items_toplevel_count);
     map_pack_each_if(packer, &map, ctx, &is_not_kv_to_nest);
-
-    flb_debug("[filter_nest].apply_nesting_rules : Adding nest");
 
     // * * * Pack the nested map key
     helper_pack_string(packer, ctx->nesting_key);
@@ -255,22 +221,23 @@ static int cb_nest_filter(void *data, size_t bytes,
     msgpack_packer packer;
     msgpack_packer_init(&packer, &buffer, msgpack_sbuffer_write);
 
-    flb_debug("[filter_nest] Operating nest filter. Moving keys matching '%s' to '%s'", 
+    flb_debug("[filter_nest] Moving keys matching '%s' to nested map '%s'", 
         ctx->wildcard,
         ctx->nesting_key
         );
 
     // Records come in the format,
     //
-    // [ TIMESTAMP, { K1:V1, K2:V2 ...} ], 
-    // [ TIMESTAMP, { K1:V1, K2:V2 ...} ]
-    // ex,
+    // [ TIMESTAMP, { K1:V1, K2:V2, ...} ], 
+    // [ TIMESTAMP, { K1:V1, K2:V2, ...} ]
+    //
+    // Example record,
     // [1123123, {"Mem.total"=>4050908, "Mem.used"=>476576, "Mem.free"=>3574332 } ]
 
     msgpack_unpacked_init(&result);
     while (msgpack_unpack_next(&result, data, bytes, &off)) {
         if (result.data.type == MSGPACK_OBJECT_ARRAY) {
-          flb_debug("[filter_nest] Record is an array");
+          flb_debug("[filter_nest] Record is an array, applying rules");
           apply_nesting_rules(&packer, &result.data, ctx);
         } else {
           flb_debug("[filter_nest] Record is NOT an array, skipping");
