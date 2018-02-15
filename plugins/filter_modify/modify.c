@@ -29,8 +29,7 @@
 #include "modify.h"
 
 static int setup(struct filter_modify_ctx *ctx,
-                     struct flb_filter_instance *f_ins,
-                     struct flb_config *config)
+                 struct flb_filter_instance *f_ins, struct flb_config *config)
 {
     struct mk_list *head;
     struct mk_list *split;
@@ -63,7 +62,8 @@ static int setup(struct filter_modify_ctx *ctx,
 
         split = flb_utils_split(prop->val, ' ', 1);
         if (mk_list_size(split) != 2) {
-            flb_error("[filter_modify] invalid value, expected key and value");
+            flb_error
+                ("[filter_modify] invalid value, expected key and value");
             delete_rules(ctx);
             flb_free(rule);
             flb_utils_split_free(split);
@@ -76,9 +76,7 @@ static int setup(struct filter_modify_ctx *ctx,
 
         sentry = mk_list_entry_last(split, struct flb_split_entry, _head);
         rule->val = flb_strndup(sentry->value, sentry->len);
-        rule->val_len = sentry->len
-
-        flb_utils_split_free(split);
+        rule->val_len = sentry->len flb_utils_split_free(split);
 
     }
 
@@ -113,8 +111,7 @@ static void helper_pack_string(msgpack_packer * packer, const char *str)
 }
 
 static inline int map_count_records_matching_rule(msgpack_object * map,
-                            modify_rule* rule
-    )
+                                                  modify_rule * rule)
 {
     int i;
     int count = 0;
@@ -127,8 +124,7 @@ static inline int map_count_records_matching_rule(msgpack_object * map,
     return count;
 }
 
-static inline bool kv_key_matches(msgpack_object_kv * kv,
-                                 modify_rule* rule)
+static inline bool kv_key_matches(msgpack_object_kv * kv, modify_rule * rule)
 {
 
     char *key;
@@ -148,18 +144,17 @@ static inline bool kv_key_matches(msgpack_object_kv * kv,
         return false;
     }
 
-    return ((rule->key_len == klen) &&
-        (strncmp(rule->key, key, klen) == 0)
+    return ((rule->key_len == klen) && (strncmp(rule->key, key, klen) == 0)
         );
 }
 
-static inline bool not_kv_key_matches(msgpack_object_kv * kv,
-                                     char *match)
+static inline bool not_kv_key_matches(msgpack_object_kv * kv, char *match)
 {
     return !kv_key_matches(kv, match);
 }
 
-static inline int count_rules_not_matched(msgpack_object * map, struct mk_list *rules) 
+static inline int count_rules_not_matched(msgpack_object * map,
+                                          struct mk_list *rules)
 {
     struct mk_list *head;
     struct modify_rule *rule;
@@ -169,18 +164,17 @@ static inline int count_rules_not_matched(msgpack_object * map, struct mk_list *
     mk_list_foreach(head, rules) {
         rule = mk_list_entry(head, struct modify_rule, _head);
         if (map_count_records_matching_rule(map, rule) > 0) {
-          counter++;
+            counter++;
         }
     }
 
     return counter;
 }
 
-static inline void pack_map_with_rename(
-    msgpack_packer * packer,
-    msgpack_object * map,
-    struct mk_list *rules
-    ) {
+static inline void pack_map_with_rename(msgpack_packer * packer,
+                                        msgpack_object * map,
+                                        struct mk_list *rules)
+{
 
     int i;
     struct mk_list *head;
@@ -190,31 +184,31 @@ static inline void pack_map_with_rename(
 
     for (i = 0; i < map->via.map.size; i++) {
 
-      matched = false;
+        matched = false;
 
-      mk_list_foreach(head, rules) {
-          rule = mk_list_entry(head, struct modify_rule, _head);
-          if (kv_key_matches(&map->via.map.ptr[i], &rule)) {
-            matched = true;
-            matched_rule = rule;
-          }
-      }
+        mk_list_foreach(head, rules) {
+            rule = mk_list_entry(head, struct modify_rule, _head);
+            if (kv_key_matches(&map->via.map.ptr[i], &rule)) {
+                matched = true;
+                matched_rule = rule;
+            }
+        }
 
-      if (matched) {
-        helper_pack_string(packer, matched_rule->val);
-      } else {
-        msgpack_pack_object(packer, map->via.map.ptr[i].key);
-      }
-      msgpack_pack_object(packer, map->via.map.ptr[i].val);
+        if (matched) {
+            helper_pack_string(packer, matched_rule->val);
+        }
+        else {
+            msgpack_pack_object(packer, map->via.map.ptr[i].key);
+        }
+        msgpack_pack_object(packer, map->via.map.ptr[i].val);
 
     }
 }
 
-static inline void pack_map_with_missing_keys(
-    msgpack_packer * packer,
-    msgpack_object * map,
-    struct mk_list *rules
-    ) {
+static inline void pack_map_with_missing_keys(msgpack_packer * packer,
+                                              msgpack_object * map,
+                                              struct mk_list *rules)
+{
 
     int i;
     struct mk_list *head;
@@ -225,15 +219,15 @@ static inline void pack_map_with_missing_keys(
     mk_list_foreach(head, rules) {
         rule = mk_list_entry(head, struct modify_rule, _head);
         if (map_count_records_matching_rule(map, rule) == 0) {
-          helper_pack_string(packer, matched_rule->key);
-          helper_pack_string(packer, matched_rule->val);
+            helper_pack_string(packer, matched_rule->key);
+            helper_pack_string(packer, matched_rule->val);
         }
     }
 }
 
 static inline void apply_modifying_rules(msgpack_packer * packer,
-                                       msgpack_object * root,
-                                       struct filter_modify_ctx *ctx)
+                                         msgpack_object * root,
+                                         struct filter_modify_ctx *ctx)
 {
     msgpack_object ts = root->via.array.ptr[0];
     msgpack_object map = root->via.array.ptr[1];
@@ -241,7 +235,8 @@ static inline void apply_modifying_rules(msgpack_packer * packer,
     // TODO: We can scan for both rules and if they both come back 0 we can
     // return without rewriting
 
-    int total_records = map.via.map.size + count_rules_not_matched(&map, &ctx->add_key_rules);
+    int total_records =
+        map.via.map.size + count_rules_not_matched(&map, &ctx->add_key_rules);
 
     // * Record array init(2)
     msgpack_pack_array(packer, 2);
@@ -265,7 +260,7 @@ static inline void apply_modifying_rules(msgpack_packer * packer,
 }
 
 static int cb_modify_init(struct flb_filter_instance *f_ins,
-                        struct flb_config *config, void *data)
+                          struct flb_config *config, void *data)
 {
     struct filter_modify_ctx *ctx;
 
@@ -287,10 +282,10 @@ static int cb_modify_init(struct flb_filter_instance *f_ins,
 }
 
 static int cb_modify_filter(void *data, size_t bytes,
-                          char *tag, int tag_len,
-                          void **out_buf, size_t * out_size,
-                          struct flb_filter_instance *f_ins,
-                          void *context, struct flb_config *config)
+                            char *tag, int tag_len,
+                            void **out_buf, size_t * out_size,
+                            struct flb_filter_instance *f_ins,
+                            void *context, struct flb_config *config)
 {
     msgpack_unpacked result;
     size_t off = 0;
@@ -305,8 +300,9 @@ static int cb_modify_filter(void *data, size_t bytes,
     msgpack_packer packer;
     msgpack_packer_init(&packer, &buffer, msgpack_sbuffer_write);
 
-    flb_debug("[filter_modify] Moving keys matching '%s' to modifyed map '%s'",
-              ctx->wildcard, ctx->modifying_key);
+    flb_debug
+        ("[filter_modify] Moving keys matching '%s' to modifyed map '%s'",
+         ctx->wildcard, ctx->modifying_key);
 
     // Records come in the format,
     //
