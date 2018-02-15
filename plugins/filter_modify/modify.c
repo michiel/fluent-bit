@@ -144,9 +144,9 @@ static inline bool kv_key_matches(msgpack_object_kv * kv, struct modify_rule * r
         );
 }
 
-static inline bool not_kv_key_matches(msgpack_object_kv * kv, char *match)
+static inline bool not_kv_key_matches(msgpack_object_kv * kv, struct modify_rule * rule)
 {
-    return !kv_key_matches(kv, match);
+    return !kv_key_matches(kv, rule);
 }
 
 static inline int map_count_records_matching_rule(msgpack_object * map,
@@ -185,7 +185,6 @@ static inline void pack_map_with_rename(msgpack_packer * packer,
                                         msgpack_object * map,
                                         struct mk_list *rules)
 {
-
     int i;
     struct mk_list *head;
     struct modify_rule *rule;
@@ -198,10 +197,9 @@ static inline void pack_map_with_rename(msgpack_packer * packer,
 
         mk_list_foreach(head, rules) {
             rule = mk_list_entry(head, struct modify_rule, _head);
-            if (kv_key_matches(&map->via.map.ptr[i], &rule)) {
+            if (kv_key_matches(&map->via.map.ptr[i], rule)) {
                 matched = true;
                 matched_rule = rule;
-                flb_debug("[filter_modify].pack_map_with_rename : %s", matched_rule->key);
             }
         }
 
@@ -221,10 +219,8 @@ static inline void pack_map_with_missing_keys(msgpack_packer * packer,
                                               struct mk_list *rules)
 {
 
-    int i;
     struct mk_list *head;
     struct modify_rule *rule;
-    bool matched;
 
     mk_list_foreach(head, rules) {
         rule = mk_list_entry(head, struct modify_rule, _head);
@@ -312,11 +308,6 @@ static int cb_modify_filter(void *data, size_t bytes,
 
     msgpack_packer packer;
     msgpack_packer_init(&packer, &buffer, msgpack_sbuffer_write);
-
-    flb_debug("[filter_modify] %d rename rules, %d add-if-not-present rules",
-        ctx->rename_key_rules_cnt,
-        ctx->add_key_rules_cnt
-        );
 
     // Records come in the format,
     //
