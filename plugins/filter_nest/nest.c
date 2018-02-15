@@ -31,16 +31,6 @@
 
 #include "nest.h"
 
-static void pack_string(msgpack_packer *packer, const char *str) {
-	if(str == NULL) {
-		msgpack_pack_nil(packer);
-	} else {
-		int len = (int) strlen(str);
-		msgpack_pack_str(packer, len);
-		msgpack_pack_str_body(packer, str, len);
-	}
-}
-
 static int configure(struct filter_nest_ctx *ctx,
                      struct flb_filter_instance *f_ins,
                      struct flb_config *config)
@@ -50,7 +40,7 @@ static int configure(struct filter_nest_ctx *ctx,
     ctx->nesting_key = NULL;
     ctx->wildcard = NULL;
 
-    /* Nest key name */
+    // Nest key name
     tmp = flb_filter_get_property("Nest_under", f_ins);
     if (tmp) {
         ctx->nesting_key = flb_strdup(tmp);
@@ -60,7 +50,7 @@ static int configure(struct filter_nest_ctx *ctx,
         return -1;
     }
 
-    /* Wildcard key name */
+    // Wildcard key name
     tmp = flb_filter_get_property("Wildcard", f_ins);
     if (tmp) {
         ctx->wildcard = flb_strdup(tmp);
@@ -81,6 +71,24 @@ static int configure(struct filter_nest_ctx *ctx,
     return 0;
 }
 
+static void helper_pack_string(msgpack_packer *packer, const char *str) {
+  if(str == NULL) {
+    msgpack_pack_nil(packer);
+  } else {
+    int len = (int) strlen(str);
+    msgpack_pack_str(packer, len);
+    msgpack_pack_str_body(packer, str, len);
+  }
+}
+
+static void debug_print_key(msgpack_object_kv *kv) {
+  if (kv->key.type == MSGPACK_OBJECT_STR) {
+    flb_debug("Key is %s\n", kv->key.via.str.ptr);
+  } else {
+    flb_debug("Key is not a string");
+  }
+}
+
 static inline void map_pack_each_if(
     msgpack_packer *packer,
     msgpack_object *map,
@@ -92,8 +100,14 @@ static inline void map_pack_each_if(
 
     for (i = 0; i < map->via.map.size; i++) {
         if ((*f)(&map->via.map.ptr[i], ctx)) {
+          flb_debug("[filter_next].map_pack_each_if : Accepting key,");
+          debug_print_key(&map->via.map.ptr[i]);
+
           msgpack_pack_object(packer, map->via.map.ptr[i].key);
           msgpack_pack_object(packer, map->via.map.ptr[i].val);
+        } else {
+          flb_debug("[filter_next].map_pack_each_if : Rejecting key,");
+          debug_print_key(&map->via.map.ptr[i]);
         }
     }
 }
@@ -171,16 +185,24 @@ static inline void apply_nesting_rules(
     size_t items_to_nest_count = map_count(&map, ctx, &is_kv_to_nest);
     size_t items_toplevel_count = (map.via.map.size - items_to_nest_count + 1);
 
-    // Create a new map with toplevel items +1 for nested map
-    msgpack_pack_map(packer, items_toplevel_count);
-    map_pack_each_if(packer, &map, ctx, is_not_kv_to_nest);
+    flb_debug("[filter_nest].apply_nesting_rules : Top size %d, nest size %d",
+        items_toplevel_count,
+        items_to_nest_count);
 
+    // Create a new map with toplevel items +1 for nested map
+    flb_debug("[filter_nest].apply_nesting_rules : Packing top level");
+    msgpack_pack_map(packer, items_toplevel_count);
+    map_pack_each_if(packer, &map, ctx, &is_not_kv_to_nest);
+
+    flb_debug("[filter_nest].apply_nesting_rules : Adding nest");
     // Pack the nested map key
-    pack_string(packer, ctx->nesting_key);
+    helper_pack_string(packer, ctx->nesting_key);
+
     // Create the nest map value
     msgpack_pack_map(packer, items_to_nest_count);
+
     // Add the nested items
-    map_pack_each_if(packer, &map, ctx, is_kv_to_nest);
+    map_pack_each_if(packer, &map, ctx, &is_kv_to_nest);
 }
 
 static int cb_nest_init(struct flb_filter_instance *f_ins,
@@ -201,7 +223,7 @@ static int cb_nest_init(struct flb_filter_instance *f_ins,
         return -1;
     }
 
-    /* Set our context */
+    // Set context
     flb_filter_set_context(f_ins, ctx);
     return 0;
 }
