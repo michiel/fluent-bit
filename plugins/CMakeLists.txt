@@ -149,6 +149,7 @@ if(FLB_REGEX)
 endif()
 REGISTER_FILTER_PLUGIN("filter_record_modifier")
 REGISTER_FILTER_PLUGIN("filter_nest")
+REGISTER_FILTER_PLUGIN("filter_modify")
 
 # Register external input and output plugins
 if(EXT_IN_PLUGINS)
