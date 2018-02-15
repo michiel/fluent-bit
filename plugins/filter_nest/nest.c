@@ -81,124 +81,106 @@ static int configure(struct filter_nest_ctx *ctx,
     return 0;
 }
 
-static inline void nest_data(
+static inline void map_pack_each_if(
     msgpack_packer *packer,
-    msgpack_object map,
-    struct filter_nest_ctx *ctx)
+    msgpack_object *map,
+    struct filter_nest_ctx *ctx,
+    bool (*f)(msgpack_object_kv *kv, struct filter_nest_ctx *ctx)
+    )
+{
+    int i;
+
+    for (i = 0; i < map->via.map.size; i++) {
+        if ((*f)(&map->via.map.ptr[i], ctx)) {
+          msgpack_pack_object(packer, map->via.map.ptr[i].key);
+          msgpack_pack_object(packer, map->via.map.ptr[i].val);
+        }
+    }
+}
+
+static inline int map_count(
+    msgpack_object *map,
+    struct filter_nest_ctx *ctx,
+    bool (*f)(msgpack_object_kv *kv, struct filter_nest_ctx *ctx)
+    )
+{
+  int i;
+  int count = 0;
+
+  for (i = 0; i < map->via.map.size; i++) {
+    if ((*f)(&map->via.map.ptr[i], ctx)) {
+      count++;
+    }
+  }
+  return count;
+}
+
+static inline bool is_kv_to_nest(
+    msgpack_object_kv *kv,
+    struct filter_nest_ctx *ctx
+    ) 
 {
 
-    int i;
-    int klen;
-    int vlen;
-    char *key;
-    char *val;
-    msgpack_object *k;
-    msgpack_object *v;
-    struct mk_list *head;
+  msgpack_object *obj;
+  char *key;
+  int klen;
 
-    size_t keys_to_nest = 0;
-    size_t keys_to_keep = 0;
-    bool matched = false;
+  obj = &kv->key;
 
-    msgpack_packer nest_packer;
-    msgpack_sbuffer* nest_buffer = msgpack_sbuffer_new();
-    msgpack_packer_init(&nest_packer, &nest_buffer, msgpack_sbuffer_write);
+  if (obj->type == MSGPACK_OBJECT_BIN) {
+    key = (char *) obj->via.bin.ptr;
+    klen = obj->via.bin.size;
+  } else if (obj->type == MSGPACK_OBJECT_STR) {
+    key  = (char *) obj->via.str.ptr;
+    klen = obj->via.str.size;
+  } else {
+    return false;
+  }
 
-    // Do an inventory of the map
-    for (i = 0; i < map.via.map.size; i++) {
-        k = &map.via.map.ptr[i].key;
-
-        if (k->type == MSGPACK_OBJECT_BIN) {
-            key = (char *) k->via.bin.ptr;
-            klen = k->via.bin.size;
-        } else if (k->type == MSGPACK_OBJECT_STR) {
-            key  = (char *) k->via.str.ptr;
-            klen = k->via.str.size;
-        } else {
-            continue;
-        }
-
-        flb_debug("XX nest_data : inventory iteration %d - key is %s\n", i, key);
-
-        if (strncmp(key, ctx->nesting_key, klen) == 0) {
-            flb_debug("[filter_nest] (scan) Existing nested map key found '%s', checking value ..", key);
-            v = &map.via.map.ptr[i].val;
-
-            if (v->type != MSGPACK_OBJECT_ARRAY) {
-              flb_error("[filter_nest] (scan) Nest_to key '%s' found but it is not a map, aborting", key);
-            } else {
-              flb_info("[filter_nest] (scan) Nest_to key '%s'", key);
-              // clone into nest_map
-            }
-        } else if (strncmp(key, ctx->wildcard, klen) == 0) {
-          keys_to_nest++;
-        } else {
-          keys_to_keep++;
-        }
-
-        k = NULL;
-    }
-
-    keys_to_nest++; // for the nest key
-
-    // msgpack_pack_map(packer, keys_to_keep);
-    // msgpack_pack_map(&nest_packer, keys_to_nest);
-
-    // Create the new map from the previous values
-    //  - Add wildcard matches to nest_map
-    //  - Add others to map_out
-    for (i = 0; i < map.via.map.size; i++) {
-        k = &map.via.map.ptr[i].key;
-
-        if (k->type == MSGPACK_OBJECT_BIN) {
-            key = (char *) k->via.bin.ptr;
-            klen = k->via.bin.size;
-        } else if (k->type == MSGPACK_OBJECT_STR) {
-            key  = (char *) k->via.str.ptr;
-            klen = k->via.str.size;
-        } else {
-            continue;
-        }
-
-        // flb_debug("XX nest_data II : iteration %d - key is %s\n", i, key);
-
-        matched = false;
-        if (ctx->wildcard_is_dynamic) {
-          // this will positively match "ABC123" with wildcard "ABC*" 
-          matched = (strncmp(key, ctx->wildcard, ctx->wildcard_len) == 0);
-        } else {
-          // this will positively match "ABC" with wildcard "ABC" 
-          matched = (
-              (ctx->wildcard_len == klen) &&
-              (strncmp(key, ctx->wildcard, ctx->wildcard_len) == 0)
-             );
-        }
-
-        if (matched) {
-            flb_debug("[filter_nest] We have a match for key '%s' to nest '%s'", ctx->wildcard, ctx->nesting_key);
-            pack_string(&nest_packer, key);
-            pack_string(&nest_packer, key); // XX pack value
-
-        } else {
-            flb_debug("[filter_nest] No match, adding to top-level");
-            
-            pack_string(packer, key);
-            pack_string(packer, key); // XX pack value
-        }
-
-        pack_string(packer, ctx->nesting_key);
-        pack_string(packer, ctx->nesting_key); // XX pack nest_map
-
-        k = NULL;
-    }
+  if (ctx->wildcard_is_dynamic) {
+    // this will positively match "ABC123" with wildcard "ABC*" 
+    return (strncmp(key, ctx->wildcard, ctx->wildcard_len) == 0);
+  } else {
+    // this will positively match "ABC" with wildcard "ABC" 
+    return (
+        (ctx->wildcard_len == klen) &&
+        (strncmp(key, ctx->wildcard, ctx->wildcard_len) == 0)
+        );
+  }
 
 }
 
-static void nest_map_data(msgpack_packer *packer,
-    msgpack_object_map *map, 
-    struct filter_nest_ctx *ctx) 
+static inline bool is_not_kv_to_nest(
+    msgpack_object_kv *kv,
+    struct filter_nest_ctx *ctx
+    ) 
 {
+  return !is_kv_to_nest(kv, ctx);
+}
 
+static inline void apply_nesting_rules(
+    msgpack_packer *packer,
+    msgpack_object *root,
+    struct filter_nest_ctx *ctx)
+{
+    msgpack_object ts  = root->via.array.ptr[0];
+    msgpack_object map  = root->via.array.ptr[1];
+
+    msgpack_pack_object(packer, ts);
+
+    size_t items_to_nest_count = map_count(&map, ctx, &is_kv_to_nest);
+    size_t items_toplevel_count = (map.via.map.size - items_to_nest_count + 1);
+
+    // Create a new map with toplevel items +1 for nested map
+    msgpack_pack_map(packer, items_toplevel_count);
+    map_pack_each_if(packer, &map, ctx, is_not_kv_to_nest);
+
+    // Pack the nested map key
+    pack_string(packer, ctx->nesting_key);
+    // Create the nest map value
+    msgpack_pack_map(packer, items_to_nest_count);
+    // Add the nested items
+    map_pack_each_if(packer, &map, ctx, is_kv_to_nest);
 }
 
 static int cb_nest_init(struct flb_filter_instance *f_ins,
@@ -207,7 +189,7 @@ static int cb_nest_init(struct flb_filter_instance *f_ins,
 {
     struct filter_nest_ctx *ctx;
 
-    /* Create context */
+    // Create context
     ctx = flb_malloc(sizeof(struct filter_nest_ctx));
     if (!ctx) {
         flb_errno();
@@ -232,7 +214,6 @@ static int cb_nest_filter(void *data, size_t bytes,
                           struct flb_config *config)
 {
     msgpack_unpacked result;
-    msgpack_object map;
     size_t off = 0;
     (void) f_ins;
     (void) config;
@@ -250,19 +231,12 @@ static int cb_nest_filter(void *data, size_t bytes,
         ctx->nesting_key
         );
 
-    // Records come in in  the format,
+    // Records come in the format,
     //
     // [ TIMESTAMP, { K1:V1, K2:V2 ...} ], 
     // [ TIMESTAMP, { K1:V1, K2:V2 ...} ]
     // ex,
     // [1123123, {"Mem.total"=>4050908, "Mem.used"=>476576, "Mem.free"=>3574332 } ]
-    //
-    // Loop is,
-    //  - Check object type 
-    //  - If Array :
-    //    - Remove timestamp
-    //    - Process embedded object with kv pairs with nesting rules
-    //  - Else Log and skip
 
     msgpack_unpacked_init(&result);
     while (msgpack_unpack_next(&result, data, bytes, &off)) {
@@ -270,10 +244,8 @@ static int cb_nest_filter(void *data, size_t bytes,
           flb_debug("[filter_nest] Record is an array");
           msgpack_object_print(stdout, result.data);
 
-          // 0 = Timestamp
-          // 1 = Embedded object
-          map  = result.data.via.array.ptr[1];
-          // nest_data(&packer, map, context);
+          apply_nesting_rules(&packer, &result.data, ctx);
+          // msgpack_pack_object(&packer, result.data);
 
         } else {
           flb_debug("[filter_nest] Record is NOT an array, skipping");
