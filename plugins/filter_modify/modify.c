@@ -28,69 +28,22 @@
 
 #include "modify.h"
 
-static int setup(struct filter_modify_ctx *ctx,
-                 struct flb_filter_instance *f_ins, struct flb_config *config)
-{
-    struct mk_list *head;
-    struct mk_list *split;
-    struct flb_split_entry *sentry;
-    struct flb_config_prop *prop;
-    struct modify_rule *rule;
-
-    mk_list_foreach(head, &f_ins->properties) {
-        prop = mk_list_entry(head, struct flb_config_prop, _head);
-
-        rule = flb_malloc(sizeof(struct modify_rule));
-        if (!rule) {
-            flb_errno();
-            return -1;
-        }
-
-        if (strcasecmp(prop->key, "rename") == 0) {
-            ctx->rename_rules_cnt++;
-            mk_list_add(&rename_rules->_head, &ctx->rules);
-        }
-        else if (strcasecmp(prop->key, "add_if_not_present") == 0) {
-            ctx->add_key_rules_cnt++;
-            mk_list_add(&add_key_rules->_head, &ctx->rules);
-        }
-        else {
-            delete_rules(ctx);
-            flb_free(rule);
-            return -1;
-        }
-
-        split = flb_utils_split(prop->val, ' ', 1);
-        if (mk_list_size(split) != 2) {
-            flb_error
-                ("[filter_modify] invalid value, expected key and value");
-            delete_rules(ctx);
-            flb_free(rule);
-            flb_utils_split_free(split);
-            return -1;
-        }
-
-        sentry = mk_list_entry_first(split, struct flb_split_entry, _head);
-        rule->key = flb_strndup(sentry->value, sentry->len);
-        rule->key_len = sentry->len;
-
-        sentry = mk_list_entry_last(split, struct flb_split_entry, _head);
-        rule->val = flb_strndup(sentry->value, sentry->len);
-        rule->val_len = sentry->len flb_utils_split_free(split);
-
-    }
-
-    return 0;
-}
-
-static void teardown(struct grep_ctx *ctx)
+static void teardown(struct filter_modify_ctx *ctx)
 {
     struct mk_list *tmp;
     struct mk_list *head;
-    struct grep_rule *rule;
+    struct modify_rule *rule;
 
-    mk_list_foreach_safe(head, tmp, &ctx->rules) {
-        rule = mk_list_entry(head, struct grep_rule, _head);
+    mk_list_foreach_safe(head, tmp, &ctx->add_key_rules) {
+        rule = mk_list_entry(head, struct modify_rule, _head);
+        flb_free(rule->key);
+        flb_free(rule->val);
+        mk_list_del(&rule->_head);
+        flb_free(rule);
+    }
+
+    mk_list_foreach_safe(head, tmp, &ctx->rename_key_rules) {
+        rule = mk_list_entry(head, struct modify_rule, _head);
         flb_free(rule->key);
         flb_free(rule->val);
         mk_list_del(&rule->_head);
@@ -110,21 +63,64 @@ static void helper_pack_string(msgpack_packer * packer, const char *str)
     }
 }
 
-static inline int map_count_records_matching_rule(msgpack_object * map,
-                                                  modify_rule * rule)
+static int setup(struct filter_modify_ctx *ctx,
+                 struct flb_filter_instance *f_ins, struct flb_config *config)
 {
-    int i;
-    int count = 0;
+    struct mk_list *head;
+    struct mk_list *split;
+    struct flb_split_entry *sentry;
+    struct flb_config_prop *prop;
+    struct modify_rule *rule;
 
-    for (i = 0; i < map->via.map.size; i++) {
-        if (kv_key_matches(map->via.map.ptr[i], rule)) {
-            count++;
+    mk_list_foreach(head, &f_ins->properties) {
+        prop = mk_list_entry(head, struct flb_config_prop, _head);
+
+        rule = flb_malloc(sizeof(struct modify_rule));
+        if (!rule) {
+            flb_errno();
+            return -1;
         }
+
+        split = flb_utils_split(prop->val, ' ', 1);
+        if (mk_list_size(split) != 2) {
+            flb_error
+                ("[filter_modify] invalid value, expected key and value");
+            teardown(ctx);
+            flb_free(rule);
+            flb_utils_split_free(split);
+            return -1;
+        }
+
+        sentry = mk_list_entry_first(split, struct flb_split_entry, _head);
+        rule->key = flb_strndup(sentry->value, sentry->len);
+        rule->key_len = sentry->len;
+
+        sentry = mk_list_entry_last(split, struct flb_split_entry, _head);
+        rule->val = flb_strndup(sentry->value, sentry->len);
+        rule->val_len = sentry->len;
+
+        flb_utils_split_free(split);
+
+        if (strcasecmp(prop->key, "rename") == 0) {
+            ctx->rename_key_rules_cnt++;
+            mk_list_add(&rule->_head, &ctx->rename_key_rules);
+        }
+        else if (strcasecmp(prop->key, "add_if_not_present") == 0) {
+            ctx->add_key_rules_cnt++;
+            mk_list_add(&rule->_head, &ctx->add_key_rules);
+        }
+        else {
+            teardown(ctx);
+            flb_free(rule);
+            return -1;
+        }
+
     }
-    return count;
+
+    return 0;
 }
 
-static inline bool kv_key_matches(msgpack_object_kv * kv, modify_rule * rule)
+static inline bool kv_key_matches(msgpack_object_kv * kv, struct modify_rule * rule)
 {
 
     char *key;
@@ -153,6 +149,20 @@ static inline bool not_kv_key_matches(msgpack_object_kv * kv, char *match)
     return !kv_key_matches(kv, match);
 }
 
+static inline int map_count_records_matching_rule(msgpack_object * map,
+                                                  struct modify_rule * rule)
+{
+    int i;
+    int count = 0;
+
+    for (i = 0; i < map->via.map.size; i++) {
+        if (kv_key_matches(&map->via.map.ptr[i], rule)) {
+            count++;
+        }
+    }
+    return count;
+}
+
 static inline int count_rules_not_matched(msgpack_object * map,
                                           struct mk_list *rules)
 {
@@ -163,7 +173,7 @@ static inline int count_rules_not_matched(msgpack_object * map,
 
     mk_list_foreach(head, rules) {
         rule = mk_list_entry(head, struct modify_rule, _head);
-        if (map_count_records_matching_rule(map, rule) > 0) {
+        if (map_count_records_matching_rule(map, rule) == 0) {
             counter++;
         }
     }
@@ -191,6 +201,7 @@ static inline void pack_map_with_rename(msgpack_packer * packer,
             if (kv_key_matches(&map->via.map.ptr[i], &rule)) {
                 matched = true;
                 matched_rule = rule;
+                flb_debug("[filter_modify].pack_map_with_rename : %s", matched_rule->key);
             }
         }
 
@@ -213,14 +224,13 @@ static inline void pack_map_with_missing_keys(msgpack_packer * packer,
     int i;
     struct mk_list *head;
     struct modify_rule *rule;
-    struct modify_rule *matched_rule;
     bool matched;
 
     mk_list_foreach(head, rules) {
         rule = mk_list_entry(head, struct modify_rule, _head);
         if (map_count_records_matching_rule(map, rule) == 0) {
-            helper_pack_string(packer, matched_rule->key);
-            helper_pack_string(packer, matched_rule->val);
+            helper_pack_string(packer, rule->key);
+            helper_pack_string(packer, rule->val);
         }
     }
 }
@@ -245,17 +255,17 @@ static inline void apply_modifying_rules(msgpack_packer * packer,
     msgpack_pack_object(packer, ts);
 
     flb_debug
-        ("[filter_modify] Input size %d elements, output size %d elements",
+        ("[filter_modify] Input map size %d elements, output map size %d elements",
          map.via.map.size, total_records);
 
     // * * Record array item 2/2
     msgpack_pack_map(packer, total_records);
 
     // * * * Add from input map to new map with items renamed
-    pack_map_with_rename(packer, &map, &ctx->rename_rules);
+    pack_map_with_rename(packer, &map, &ctx->rename_key_rules);
 
     // * * * Add missing keys with defaults to new map
-    pack_map_with_missing_keys(packer, &map, &ctx->add_if_not_present);
+    pack_map_with_missing_keys(packer, &map, &ctx->add_key_rules);
 
 }
 
@@ -270,6 +280,9 @@ static int cb_modify_init(struct flb_filter_instance *f_ins,
         flb_errno();
         return -1;
     }
+
+    mk_list_init(&ctx->rename_key_rules);
+    mk_list_init(&ctx->add_key_rules);
 
     if (setup(ctx, f_ins, config) < 0) {
         flb_free(ctx);
@@ -300,9 +313,10 @@ static int cb_modify_filter(void *data, size_t bytes,
     msgpack_packer packer;
     msgpack_packer_init(&packer, &buffer, msgpack_sbuffer_write);
 
-    flb_debug
-        ("[filter_modify] Moving keys matching '%s' to modifyed map '%s'",
-         ctx->wildcard, ctx->modifying_key);
+    flb_debug("[filter_modify] %d rename rules, %d add-if-not-present rules",
+        ctx->rename_key_rules_cnt,
+        ctx->add_key_rules_cnt
+        );
 
     // Records come in the format,
     //
