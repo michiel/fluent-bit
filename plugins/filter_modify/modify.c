@@ -322,11 +322,9 @@ static int cb_modify_filter(void *data, size_t bytes,
     msgpack_unpacked_init(&result);
     while (msgpack_unpack_next(&result, data, bytes, &off)) {
         if (result.data.type == MSGPACK_OBJECT_ARRAY) {
-            flb_debug("[filter_modify] Record is an array, applying rules");
             apply_modifying_rules(&packer, &result.data, ctx);
         }
         else {
-            flb_debug("[filter_modify] Record is NOT an array, skipping");
             msgpack_pack_object(&packer, result.data);
         }
     }
