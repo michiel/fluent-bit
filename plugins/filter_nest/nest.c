@@ -161,7 +161,6 @@ static inline bool is_kv_to_nest(
         (strncmp(key, ctx->wildcard, ctx->wildcard_len) == 0)
         );
   }
-
 }
 
 static inline bool is_not_kv_to_nest(
@@ -180,6 +179,10 @@ static inline void apply_nesting_rules(
     msgpack_object ts  = root->via.array.ptr[0];
     msgpack_object map  = root->via.array.ptr[1];
 
+    // * Record array init(2)
+    msgpack_pack_array(packer, 2);
+
+    // * * Record array item 1/2
     msgpack_pack_object(packer, ts);
 
     size_t items_to_nest_count = map_count(&map, ctx, &is_kv_to_nest);
@@ -189,25 +192,29 @@ static inline void apply_nesting_rules(
         items_toplevel_count,
         items_to_nest_count);
 
-    // Create a new map with toplevel items +1 for nested map
+    // * * Record array item 2/2
+    // * * Create a new map with toplevel items +1 for nested map
     flb_debug("[filter_nest].apply_nesting_rules : Packing top level");
     msgpack_pack_map(packer, items_toplevel_count);
     map_pack_each_if(packer, &map, ctx, &is_not_kv_to_nest);
 
     flb_debug("[filter_nest].apply_nesting_rules : Adding nest");
-    // Pack the nested map key
+
+    // * * * Pack the nested map key
     helper_pack_string(packer, ctx->nesting_key);
 
-    // Create the nest map value
+    // * * * Create the nest map value
     msgpack_pack_map(packer, items_to_nest_count);
 
-    // Add the nested items
+    // * * * * Pack the nested items
     map_pack_each_if(packer, &map, ctx, &is_kv_to_nest);
 }
 
-static int cb_nest_init(struct flb_filter_instance *f_ins,
-                        struct flb_config *config,
-                        void *data)
+static int cb_nest_init(
+    struct flb_filter_instance *f_ins,
+    struct flb_config *config,
+    void *data
+    )
 {
     struct filter_nest_ctx *ctx;
 
@@ -242,11 +249,11 @@ static int cb_nest_filter(void *data, size_t bytes,
 
     struct filter_nest_ctx *ctx = context;
 
-    msgpack_sbuffer sbuffer;
-    msgpack_sbuffer_init(&sbuffer);
+    msgpack_sbuffer buffer;
+    msgpack_sbuffer_init(&buffer);
 
     msgpack_packer packer;
-    msgpack_packer_init(&packer, &sbuffer, msgpack_sbuffer_write);
+    msgpack_packer_init(&packer, &buffer, msgpack_sbuffer_write);
 
     flb_debug("[filter_nest] Operating nest filter. Moving keys matching '%s' to '%s'", 
         ctx->wildcard,
@@ -264,21 +271,16 @@ static int cb_nest_filter(void *data, size_t bytes,
     while (msgpack_unpack_next(&result, data, bytes, &off)) {
         if (result.data.type == MSGPACK_OBJECT_ARRAY) {
           flb_debug("[filter_nest] Record is an array");
-          msgpack_object_print(stdout, result.data);
-
           apply_nesting_rules(&packer, &result.data, ctx);
-          // msgpack_pack_object(&packer, result.data);
-
         } else {
           flb_debug("[filter_nest] Record is NOT an array, skipping");
           msgpack_pack_object(&packer, result.data);
-          continue;
         }
     }
     msgpack_unpacked_destroy(&result);
 
-    *out_buf   = sbuffer.data;
-    *out_size = sbuffer.size;
+    *out_buf  = buffer.data;
+    *out_size = buffer.size;
 
     return FLB_FILTER_MODIFIED;
 }
