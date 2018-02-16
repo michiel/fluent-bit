@@ -127,71 +127,43 @@ int u8_read_escape_sequence(char *str, u_int32_t *dest)
 int u8_unescape(char *buf, int sz, char *src)
 {
     int count = 0;
-    int amount;
+    int amount = 0;
     u_int32_t ch;
     char temp[4];
+    int bumpcount = 0;
+    int esc_in = 0;
+    int esc_out = 0;
 
     while (*src && count < sz) {
-
         if (*src == '\\') {
             src++;
             amount = u8_read_escape_sequence(src, &ch);
+            esc_in = amount + 1;
         }
         else {
             ch = (u_int32_t)*src;
             amount = 1;
+            esc_in = amount;
         }
 
         src += amount;
-
         amount = u8_wc_toutf8(temp, ch);
+        esc_out = amount;
+
+        bumpcount += esc_in - esc_out;
+
         if (amount > sz-count) {
+            flb_error("Crossing over string boundary");
             break;
         }
-
         memcpy(&buf[count], temp, amount);
         count += amount;
     }
     if (count < sz) {
-        buf[count] = '\0';
+        flb_error("Not at boundary but still NULL terminating");
     }
-    return count;
-}
-
-
-static int str_unescape_utf8X(char *src, char *dest, int len)
-{
-    int src_idx = 0;
-    int dst_idx = 0;
-
-    while (src_idx < len) {
-        if ((*src + src_idx) == '\\') {
-          flb_debug("XZCZXC");
-        }
-
-        if (
-            ((*src + src_idx) == '\\') &&
-            ((*src + src_idx + 1) == 'u') &&
-            ((*src + src_idx + 2) == '0') &&
-            ((*src + src_idx + 3) == '0') &&
-            ((*src + src_idx + 4) == '0') &&
-            ((*src + src_idx + 5) == '9')
-            ) 
-        {
-          *(dest+dst_idx) = 'X';
-          dst_idx++;
-          src_idx = src_idx + 5;
-
-        } else {
-          *(dest+dst_idx) = *(src+src_idx);
-          dst_idx++;
-          src_idx++;
-        }
-    }
-
-    *(dest + dst_idx) = '\0';
-    return dst_idx;
-
+    buf[count] = '\0';
+    return bumpcount;
 }
 
 static int str_unescape_utf8(char *src, char *dest, int len)
@@ -218,58 +190,6 @@ static int str_unescape_utf8(char *src, char *dest, int len)
 
 }
 
-static int unescape_stringX(char *buf, int buf_len, char **unesc_buf)
-{
-    int i = 0;
-    int j = 0;
-    char *p;
-    char n;
-
-    p = *unesc_buf;
-    while (i < buf_len) {
-        if (buf[i] == '\\') {
-            if (i + 1 < buf_len) {
-                n = buf[i + 1];
-                if (n == 'n') {
-                    p[j++] = '\n';
-                    i++;
-                }
-                else if (n == 'a') {
-                    p[j++] = '\a';
-                    i++;
-                }
-                else if (n == 'b') {
-                    p[j++] = '\b';
-                    i++;
-                }
-                else if (n == 't') {
-                    p[j++] = '\t';
-                    i++;
-                }
-                else if (n == 'v') {
-                    p[j++] = '\v';
-                    i++;
-                }
-                else if (n == 'f') {
-                    p[j++] = '\f';
-                    i++;
-                }
-                else if (n == 'r') {
-                    p[j++] = '\r';
-                    i++;
-                }
-                i++;
-                continue;
-            }
-            else {
-                i++;
-            }
-        }
-        p[j++] = buf[i++];
-    }
-    p[j] = '\0';
-    return j;
-}
 
 static int unescape_string(char *buf, int buf_len, char **unesc_buf)
 {
@@ -423,7 +343,7 @@ int flb_parser_decoder_do(struct mk_list *decoders,
         }
 
         /* Check if the current key name matches some decoder rule */
-        bool value_has_been_mangled = false;
+        bool value_has_been_changed = false;
         buf = NULL;
         mk_list_foreach(head, decoders) {
             dec = mk_list_entry(head, struct flb_parser_dec, _head);
@@ -437,6 +357,8 @@ int flb_parser_decoder_do(struct mk_list *decoders,
 
             if (dec->buf_size < v.via.str.size) {
                 tmp = flb_realloc(dec->buf_data, v.via.str.size);
+                memset(dec->buf_data, 0, v.via.str.size);
+
                 if (!tmp) {
                     flb_errno();
                     break;
@@ -459,7 +381,7 @@ int flb_parser_decoder_do(struct mk_list *decoders,
               msgpack_pack_object(&mp_pck, k);
               msgpack_sbuffer_write(&mp_sbuf, buf, size);
 
-              value_has_been_mangled = true;
+              value_has_been_changed = true;
 
             } else if (dec->type == FLB_PARSER_DEC_UNESCAPE_UTF8) {
               // flb_debug("[parser_dec] Unescaping UTF-8");
@@ -472,10 +394,15 @@ int flb_parser_decoder_do(struct mk_list *decoders,
                   (char *) v.via.str.ptr
                   );
 
+              // flb_debug("Bump count is %d for '%s'", len, dec->buf_data);
+
+              len = v.via.str.size - len + 1; 
+              // len = v.via.str.size;
+
               msgpack_pack_str(&mp_pck, len);
               msgpack_pack_str_body(&mp_pck, dec->buf_data, len);
 
-              value_has_been_mangled = true;
+              value_has_been_changed = true;
 
             } else {
               flb_debug("[parser_dec: No match");
@@ -490,7 +417,7 @@ int flb_parser_decoder_do(struct mk_list *decoders,
             buf = NULL;
         }
 
-        if (!value_has_been_mangled) {
+        if (!value_has_been_changed) {
             msgpack_pack_object(&mp_pck, k);
             msgpack_pack_object(&mp_pck, v);
         }
