@@ -357,7 +357,6 @@ int flb_parser_decoder_do(struct mk_list *decoders,
 
             if (dec->buf_size < v.via.str.size) {
                 tmp = flb_realloc(dec->buf_data, v.via.str.size);
-                memset(dec->buf_data, 0, v.via.str.size);
 
                 if (!tmp) {
                     flb_errno();
