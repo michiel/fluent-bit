@@ -32,15 +32,8 @@
 
 #include "kube_conf.h"
 #include "kube_meta.h"
-<<<<<<< HEAD
-<<<<<<< HEAD
 #include "kube_property.h"
-=======
 #include <stdio.h>
->>>>>>> first set
-=======
-#include <stdio.h>
->>>>>>> 181f07099240cba829efaf8bebcbf216f5fa39ca
 
 static int file_to_buffer(char *path, char **out_buf, size_t *out_size)
 {
