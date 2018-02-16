@@ -52,6 +52,8 @@ struct flb_kube_meta {
 #define FLB_KUBE_API_HOST "kubernetes.default.svc"
 #define FLB_KUBE_API_PORT 443
 #define FLB_KUBE_API_FMT "/api/v1/namespaces/%s/pods/%s"
+#define FLB_KUBE_FLAT_PREFIX "k8s"
+#define FLB_KUBE_FLAT_DELIMITER ":"
 
 int flb_kube_meta_init(struct flb_kube *ctx, struct flb_config *config);
 int flb_kube_meta_fetch(struct flb_kube *ctx);

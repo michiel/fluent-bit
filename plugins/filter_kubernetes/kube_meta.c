@@ -32,7 +32,15 @@
 
 #include "kube_conf.h"
 #include "kube_meta.h"
+<<<<<<< HEAD
+<<<<<<< HEAD
 #include "kube_property.h"
+=======
+#include <stdio.h>
+>>>>>>> first set
+=======
+#include <stdio.h>
+>>>>>>> 181f07099240cba829efaf8bebcbf216f5fa39ca
 
 static int file_to_buffer(char *path, char **out_buf, size_t *out_size)
 {
@@ -269,6 +277,8 @@ static int merge_meta(struct flb_kube_meta *meta, struct flb_kube *ctx,
     msgpack_object v;
     msgpack_object meta_val;
     msgpack_object spec_val;
+    msgpack_object labels_val;
+    msgpack_object annotations_val;
     msgpack_object api_map;
     msgpack_object ann_map;
     struct flb_kube_props props = {0};
@@ -359,13 +369,23 @@ static int merge_meta(struct flb_kube_meta *meta, struct flb_kube *ctx,
         }
         else if (size == 6 && strncmp(ptr, "labels", 6) == 0) {
             have_labels = i;
-            map_size++;
+            if (ctx->flat == FLB_FALSE ) {
+                map_size++;
+            }
+            else if (ctx->flat == FLB_TRUE) {
+                labels_val = meta_val.via.map.ptr[i].val;
+                map_size += labels_val.via.map.size;
+            }
         }
 
         else if (size == 11 && strncmp(ptr, "annotations", 11) == 0) {
             have_annotations = i;
-            if (ctx->annotations == FLB_TRUE) {
+            if (ctx->annotations == FLB_TRUE && ctx->flat == FLB_FALSE ) {
                 map_size++;
+            }
+            else if (ctx->annotations == FLB_TRUE && ctx->flat == FLB_TRUE) {
+                annotations_val = meta_val.via.map.ptr[i].val;
+                map_size += annotations_val.via.map.size;
             }
         }
 
@@ -389,15 +409,38 @@ static int merge_meta(struct flb_kube_meta *meta, struct flb_kube *ctx,
 
     /* Append Regex fields */
     msgpack_pack_map(&mp_pck, map_size);
+    char buf_key[256];
+    size_t buf_size = 0;
+    char *key_ptr = NULL;
     if (meta->podname != NULL) {
-        msgpack_pack_str(&mp_pck, 8);
-        msgpack_pack_str_body(&mp_pck, "pod_name", 8);
+        if (ctx->flat == FLB_FALSE) {
+            msgpack_pack_str(&mp_pck, 8);
+            msgpack_pack_str_body(&mp_pck, "pod_name", 8);
+        }
+        else {
+            strcpy(buf_key, ctx->flat_key_prefix);
+            strcat(buf_key, "pod_name");
+            buf_size = strlen(buf_key);
+
+            msgpack_pack_str(&mp_pck, buf_size);
+            msgpack_pack_str_body(&mp_pck, buf_key, buf_size);
+        }
         msgpack_pack_str(&mp_pck, meta->podname_len);
         msgpack_pack_str_body(&mp_pck, meta->podname, meta->podname_len);
     }
     if (meta->namespace != NULL) {
-        msgpack_pack_str(&mp_pck, 14);
-        msgpack_pack_str_body(&mp_pck, "namespace_name", 14);
+        if (ctx->flat == FLB_FALSE) {
+            msgpack_pack_str(&mp_pck, 14);
+            msgpack_pack_str_body(&mp_pck, "namespace_name", 14);
+        } 
+        else {
+            strcpy(buf_key, ctx->flat_key_prefix);
+            strcat(buf_key, "namespace_name");
+            buf_size = strlen(buf_key);
+
+            msgpack_pack_str(&mp_pck, buf_size);
+            msgpack_pack_str_body(&mp_pck, buf_key, buf_size);
+        }
         msgpack_pack_str(&mp_pck, meta->namespace_len);
         msgpack_pack_str_body(&mp_pck, meta->namespace, meta->namespace_len);
     }
@@ -406,32 +449,98 @@ static int merge_meta(struct flb_kube_meta *meta, struct flb_kube *ctx,
     if (have_uid >= 0) {
         v = meta_val.via.map.ptr[have_uid].val;
 
-        msgpack_pack_str(&mp_pck, 6);
-        msgpack_pack_str_body(&mp_pck, "pod_id", 6);
+        if (ctx->flat == FLB_FALSE) {
+            msgpack_pack_str(&mp_pck, 6);
+            msgpack_pack_str_body(&mp_pck, "pod_id", 6);
+        } else {
+            strcpy(buf_key, ctx->flat_key_prefix);
+            strcat(buf_key, "pod_id");
+            buf_size = strlen(buf_key);
+
+            msgpack_pack_str(&mp_pck, buf_size);
+            msgpack_pack_str_body(&mp_pck, buf_key, buf_size);
+        }
         msgpack_pack_object(&mp_pck, v);
     }
 
     if (have_labels >= 0) {
-        k = meta_val.via.map.ptr[have_labels].key;
-        v = meta_val.via.map.ptr[have_labels].val;
+        if (ctx->flat == FLB_FALSE) {
+            k = meta_val.via.map.ptr[have_labels].key;
+            v = meta_val.via.map.ptr[have_labels].val;
+    
+            msgpack_pack_object(&mp_pck, k);
+            msgpack_pack_object(&mp_pck, v);
+        } else {
+            for (i = 0; i < labels_val.via.map.size; i++) {
+                k = labels_val.via.map.ptr[i].key;
+                v = labels_val.via.map.ptr[i].val;
 
-        msgpack_pack_object(&mp_pck, k);
-        msgpack_pack_object(&mp_pck, v);
+                /*key_ptr  = (char *) k.via.str.ptr;
+                /*strcpy(buf_key, "k8s:labels:");
+                strcat(buf_key, key_ptr);
+                buf_size = strlen(buf_key);*/
+                if (k.type == MSGPACK_OBJECT_STR) {
+                    key_ptr  = (char *) k.via.str.ptr;
+
+                    // TODO: make sure buf_key is large enough
+                    strncpy(buf_key, ctx->flat_labels_prefix, 24);
+                    strncat(buf_key, key_ptr, k.via.str.size);                 
+
+                    buf_size = strlen(buf_key);
+
+                    msgpack_pack_str(&mp_pck, buf_size);
+                    msgpack_pack_str_body(&mp_pck, buf_key, buf_size);
+                    msgpack_pack_object(&mp_pck, v);
+                }
+            }        
+        }
     }
 
     if (have_annotations >= 0 && ctx->annotations == FLB_TRUE) {
-        k = meta_val.via.map.ptr[have_annotations].key;
-        v = meta_val.via.map.ptr[have_annotations].val;
+        if (ctx->flat == FLB_FALSE) {
+            k = meta_val.via.map.ptr[have_annotations].key;
+            v = meta_val.via.map.ptr[have_annotations].val;
+    
+            msgpack_pack_object(&mp_pck, k);
+            msgpack_pack_object(&mp_pck, v);
+        }
+        else {
+            for (i = 0; i < annotations_val.via.map.size; i++) {
+                k = annotations_val.via.map.ptr[i].key;
+                v = annotations_val.via.map.ptr[i].val;
 
-        msgpack_pack_object(&mp_pck, k);
-        msgpack_pack_object(&mp_pck, v);
+                if (k.type == MSGPACK_OBJECT_STR) {
+                    key_ptr  = (char *) k.via.str.ptr;
+
+                    // TODO: make sure buf_key is large enough
+                    strncpy(buf_key, ctx->flat_annotations_prefix, 32);
+                    strncat(buf_key, key_ptr, k.via.str.size);                 
+
+                    buf_size = strlen(buf_key);
+
+                    msgpack_pack_str(&mp_pck, buf_size);
+                    msgpack_pack_str_body(&mp_pck, buf_key, buf_size);
+                    msgpack_pack_object(&mp_pck, v);
+                }
+            }
+        }
     }
 
     if (have_nodename >= 0) {
         v = spec_val.via.map.ptr[have_nodename].val;
 
-        msgpack_pack_str(&mp_pck, 4);
-        msgpack_pack_str_body(&mp_pck, "host", 4);
+        if (ctx->flat == FLB_FALSE) {
+            msgpack_pack_str(&mp_pck, 4);
+            msgpack_pack_str_body(&mp_pck, "host", 4);
+        } 
+        else {
+            strcpy(buf_key, ctx->flat_key_prefix);
+            strcat(buf_key, "host");
+            buf_size = strlen(buf_key);
+
+            msgpack_pack_str(&mp_pck, buf_size);
+            msgpack_pack_str_body(&mp_pck, buf_key, buf_size);
+        }
         msgpack_pack_object(&mp_pck, v);
     }
 
@@ -655,11 +764,13 @@ static int flb_kube_network_init(struct flb_kube *ctx, struct flb_config *config
     return 0;
 }
 
-static int flb_dummy_meta(char **out_buf, size_t *out_size)
+static int flb_dummy_meta(struct flb_kube *ctx, char **out_buf, size_t *out_size)
 {
     int len;
+    size_t buf_size = 0;
     time_t t;
     char stime[32];
+    char buf_key[256];
     struct tm result;
     msgpack_sbuffer mp_sbuf;
     msgpack_packer mp_pck;
@@ -673,8 +784,18 @@ static int flb_dummy_meta(char **out_buf, size_t *out_size)
     msgpack_packer_init(&mp_pck, &mp_sbuf, msgpack_sbuffer_write);
 
     msgpack_pack_map(&mp_pck, 1);
-    msgpack_pack_str(&mp_pck, 5 /* dummy */ );
-    msgpack_pack_str_body(&mp_pck, "dummy", 5);
+    if (ctx->flat == FLB_FALSE) {
+        msgpack_pack_str(&mp_pck, 5 /* dummy */ );
+        msgpack_pack_str_body(&mp_pck, "dummy", 5);
+    } 
+    else {
+        strcpy(buf_key, ctx->flat_key_prefix);
+        strcat(buf_key, "dummy");
+        buf_size = strlen(buf_key);
+
+        msgpack_pack_str(&mp_pck, buf_size);
+        msgpack_pack_str_body(&mp_pck, buf_key, buf_size);
+    }
     msgpack_pack_str(&mp_pck, len);
     msgpack_pack_str_body(&mp_pck, stime, len);
 
@@ -739,7 +860,7 @@ int flb_kube_meta_get(struct flb_kube *ctx,
     msgpack_unpacked result;
 
     if (ctx->dummy_meta == FLB_TRUE) {
-        flb_dummy_meta(out_buf, out_size);
+        flb_dummy_meta(ctx, out_buf, out_size);
         return 0;
     }
 
