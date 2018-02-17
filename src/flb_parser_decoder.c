@@ -74,6 +74,7 @@ int u8_read_escape_sequence(char *str, u_int32_t *dest)
     int dno=0, i=1;
 
     ch = (u_int32_t)str[0];    /* take literal character */
+
     if (str[0] == 'n')
         ch = L'\n';
     else if (str[0] == 't')
@@ -130,14 +131,25 @@ int u8_unescape(char *buf, int sz, char *src)
     int amount = 0;
     u_int32_t ch;
     char temp[4];
+    int tracker = 0;
     int bumpcount = 0;
     int esc_in = 0;
     int esc_out = 0;
 
-    while (*src && count < sz) {
-        if (*src == '\\') {
+    // flb_warn("Processing string (%d) '%s'", sz, src);
+    // flb_warn("Processing string (%d) '01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789'", sz);
+
+    while (*src && tracker < sz) {
+        if (*src == '\\' && (
+              ((*(src + 1)) != '\"') && // double-quote
+              ((*(src + 1)) != '\'') && // single-quote
+              ((*(src + 1)) != '\\') && // solidus
+              ((*(src + 1)) != '/')     // reverse-solidus
+              )){
+            tracker++;
             src++;
             amount = u8_read_escape_sequence(src, &ch);
+            // flb_debug("\tESCAPE '%d' at %d", amount, tracker);
             esc_in = amount + 1;
         }
         else {
@@ -147,7 +159,9 @@ int u8_unescape(char *buf, int sz, char *src)
         }
 
         src += amount;
+        tracker += amount;
         amount = u8_wc_toutf8(temp, ch);
+        // flb_debug("\tREPLACE '%d' bump up by %d", amount, (esc_in - esc_out));
         esc_out = amount;
 
         bumpcount += esc_in - esc_out;
@@ -159,37 +173,12 @@ int u8_unescape(char *buf, int sz, char *src)
         memcpy(&buf[count], temp, amount);
         count += amount;
     }
-    if (count < sz) {
-        flb_error("Not at boundary but still NULL terminating");
+    if (tracker < sz) {
+        flb_error("Not at boundary but still NULL terminating : %d - '%s'", sz, src);
     }
-    buf[count] = '\0';
+    buf[tracker - 1] = '\0';
     return bumpcount;
 }
-
-static int str_unescape_utf8(char *src, char *dest, int len)
-{
-    int src_idx = 0;
-    int dst_idx = 0;
-
-    while (src_idx < len) {
-        if (src_idx == 0) {
-          if ((*src + src_idx) == '\\') {
-            *(dest+dst_idx) = 'X';
-          } else {
-            *(dest+dst_idx) = *(src+src_idx);
-          }
-        } else {
-          *(dest+dst_idx) = *(src+src_idx);
-        }
-        dst_idx++;
-        src_idx++;
-    }
-
-    *(dest + dst_idx) = '\0';
-    return dst_idx;
-
-}
-
 
 static int unescape_string(char *buf, int buf_len, char **unesc_buf)
 {
@@ -395,8 +384,7 @@ int flb_parser_decoder_do(struct mk_list *decoders,
 
               // flb_debug("Bump count is %d for '%s'", len, dec->buf_data);
 
-              len = v.via.str.size - len + 1; 
-              // len = v.via.str.size;
+              len = v.via.str.size - len; 
 
               msgpack_pack_str(&mp_pck, len);
               msgpack_pack_str_body(&mp_pck, dec->buf_data, len);
