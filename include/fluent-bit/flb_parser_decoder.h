@@ -25,6 +25,7 @@
 
 /* Decoder types */
 #define FLB_PARSER_DEC_JSON  0
+#define FLB_PARSER_DEC_UNESCAPE_UTF8  1
 
 #define FLB_PARSER_DEC_BUF_SIZE 1024*8  /* 8KB */
 

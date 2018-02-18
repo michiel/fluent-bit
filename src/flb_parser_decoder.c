@@ -26,6 +26,155 @@
 #include <fluent-bit/flb_utils.h>
 #include <msgpack.h>
 
+int octal_digit(char c)
+{
+    return (c >= '0' && c <= '7');
+}
+
+int hex_digit(char c)
+{
+    return ((c >= '0' && c <= '9') ||
+            (c >= 'A' && c <= 'F') ||
+            (c >= 'a' && c <= 'f'));
+}
+
+int u8_wc_toutf8(char *dest, u_int32_t ch)
+{
+    if (ch < 0x80) {
+        dest[0] = (char)ch;
+        return 1;
+    }
+    if (ch < 0x800) {
+        dest[0] = (ch>>6) | 0xC0;
+        dest[1] = (ch & 0x3F) | 0x80;
+        return 2;
+    }
+    if (ch < 0x10000) {
+        dest[0] = (ch>>12) | 0xE0;
+        dest[1] = ((ch>>6) & 0x3F) | 0x80;
+        dest[2] = (ch & 0x3F) | 0x80;
+        return 3;
+    }
+    if (ch < 0x110000) {
+        dest[0] = (ch>>18) | 0xF0;
+        dest[1] = ((ch>>12) & 0x3F) | 0x80;
+        dest[2] = ((ch>>6) & 0x3F) | 0x80;
+        dest[3] = (ch & 0x3F) | 0x80;
+        return 4;
+    }
+    return 0;
+}
+
+/* assumes that src points to the character after a backslash
+   returns number of input characters processed */
+int u8_read_escape_sequence(char *str, u_int32_t *dest)
+{
+    u_int32_t ch;
+    char digs[9]="\0\0\0\0\0\0\0\0";
+    int dno=0, i=1;
+
+    ch = (u_int32_t)str[0];    /* take literal character */
+
+    if (str[0] == 'n')
+        ch = L'\n';
+    else if (str[0] == 't')
+        ch = L'\t';
+    else if (str[0] == 'r')
+        ch = L'\r';
+    else if (str[0] == 'b')
+        ch = L'\b';
+    else if (str[0] == 'f')
+        ch = L'\f';
+    else if (str[0] == 'v')
+        ch = L'\v';
+    else if (str[0] == 'a')
+        ch = L'\a';
+    else if (octal_digit(str[0])) {
+        i = 0;
+        do {
+            digs[dno++] = str[i++];
+        } while (octal_digit(str[i]) && dno < 3);
+        ch = strtol(digs, NULL, 8);
+    }
+    else if (str[0] == 'x') {
+        while (hex_digit(str[i]) && dno < 2) {
+            digs[dno++] = str[i++];
+        }
+        if (dno > 0)
+            ch = strtol(digs, NULL, 16);
+    }
+    else if (str[0] == 'u') {
+        while (hex_digit(str[i]) && dno < 4) {
+            digs[dno++] = str[i++];
+        }
+        if (dno > 0)
+            ch = strtol(digs, NULL, 16);
+    }
+    else if (str[0] == 'U') {
+        while (hex_digit(str[i]) && dno < 8) {
+            digs[dno++] = str[i++];
+        }
+        if (dno > 0)
+            ch = strtol(digs, NULL, 16);
+    }
+    *dest = ch;
+
+    return i;
+}
+
+inline bool is_json_escape(char *c)
+{
+  return (
+        (*c == '\"') || // double-quote
+        (*c == '\'') || // single-quote
+        (*c == '\\') || // solidus
+        (*c == '/')     // reverse-solidus
+      );
+}
+
+/* convert a string with literal \uxxxx or \Uxxxxxxxx characters to UTF-8
+   example: u8_unescape(mybuf, 256, "hello\\u220e")
+   note the double backslash is needed if called on a C string literal */
+int u8_unescape(char *buf, int sz, char *src)
+{
+    u_int32_t ch;
+    char temp[4];
+    char *next;
+
+    int count_out = 0;
+    int count_in = 0;
+    int esc_in = 0;
+    int esc_out = 0;
+
+    while (*src && count_in < sz) {
+        next = src + 1;
+        if (*src == '\\' && !is_json_escape(next)) {
+            esc_in = u8_read_escape_sequence((src + 1), &ch) + 1;
+        }
+        else {
+            ch = (u_int32_t)*src;
+            esc_in = 1;
+        }
+
+        src += esc_in;
+        count_in += esc_in;
+
+        esc_out = u8_wc_toutf8(temp, ch);
+
+        if (esc_out > sz-count_out) {
+            flb_error("Crossing over string boundary");
+            break;
+        }
+        memcpy(&buf[count_out], temp, esc_out);
+        count_out += esc_out;
+    }
+    if (count_in < sz) {
+        flb_error("Not at boundary but still NULL terminating : %d - '%s'", sz, src);
+    }
+    buf[count_in - 1] = '\0';
+    return count_out;
+}
+
 static int unescape_string(char *buf, int buf_len, char **unesc_buf)
 {
     int i = 0;
@@ -178,6 +327,7 @@ int flb_parser_decoder_do(struct mk_list *decoders,
         }
 
         /* Check if the current key name matches some decoder rule */
+        bool value_has_been_changed = false;
         buf = NULL;
         mk_list_foreach(head, decoders) {
             dec = mk_list_entry(head, struct flb_parser_dec, _head);
@@ -186,9 +336,12 @@ int flb_parser_decoder_do(struct mk_list *decoders,
                 continue;
             }
 
+            // flb_debug("Decoder rule matched key '%s'", dec->key_name);
             /* We got a match: 'key name' == 'decoder field name' */
+
             if (dec->buf_size < v.via.str.size) {
                 tmp = flb_realloc(dec->buf_data, v.via.str.size);
+
                 if (!tmp) {
                     flb_errno();
                     break;
@@ -198,25 +351,55 @@ int flb_parser_decoder_do(struct mk_list *decoders,
                 dec->buf_size = v.via.str.size;
             }
 
-            len = unescape_string((char *) v.via.str.ptr, v.via.str.size,
-                                  &dec->buf_data);
-            ret = flb_pack_json(dec->buf_data, len, &buf, &size);
-            if (ret != 0) {
-                flb_debug("[parser_dec] field %s is not JSON",
-                          dec->key_name);
-                break;
-            }
+            if (dec->type == FLB_PARSER_DEC_JSON) {
+              flb_debug("[parser_dec] Decoding JSON");
+              len = unescape_string((char *) v.via.str.ptr, v.via.str.size,
+                                    &dec->buf_data);
+              ret = flb_pack_json(dec->buf_data, len, &buf, &size);
+              if (ret != 0) {
+                  flb_debug("[parser_dec] field %s is not JSON",
+                            dec->key_name);
+                  break;
+              }
+              msgpack_pack_object(&mp_pck, k);
+              msgpack_sbuffer_write(&mp_sbuf, buf, size);
 
-            msgpack_pack_object(&mp_pck, k);
-            msgpack_sbuffer_write(&mp_sbuf, buf, size);
+              value_has_been_changed = true;
+
+            } else if (dec->type == FLB_PARSER_DEC_UNESCAPE_UTF8) {
+              // flb_debug("[parser_dec] Unescaping UTF-8");
+
+              msgpack_pack_object(&mp_pck, k);
+
+              len = u8_unescape(
+                  (char *) dec->buf_data,
+                  v.via.str.size,
+                  (char *) v.via.str.ptr
+                  );
+
+              // flb_debug("Bump count is %d for '%s'", len, dec->buf_data);
+
+              // len = v.via.str.size - len; 
+
+              msgpack_pack_str(&mp_pck, len);
+              msgpack_pack_str_body(&mp_pck, dec->buf_data, len);
+
+              value_has_been_changed = true;
+
+            } else {
+              flb_debug("[parser_dec: No match");
+            }
+            
             break;
+
         }
 
         if (buf) {
             flb_free(buf);
             buf = NULL;
         }
-        else {
+
+        if (!value_has_been_changed) {
             msgpack_pack_object(&mp_pck, k);
             msgpack_pack_object(&mp_pck, v);
         }
@@ -280,6 +463,9 @@ struct mk_list *flb_parser_decoder_list_create(struct mk_rconf_section *section)
         /* Get decoder */
         if (strcasecmp(decoder->value, "json") == 0) {
             type = FLB_PARSER_DEC_JSON;
+        }
+        else if (strcasecmp(decoder->value, "unescape_utf8") == 0) {
+            type = FLB_PARSER_DEC_UNESCAPE_UTF8;
         }
         else {
             flb_error("[parser] field decoder '%s' unknown", decoder->value);
