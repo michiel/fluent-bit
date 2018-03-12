@@ -49,6 +49,14 @@ static void teardown(struct filter_modify_ctx *ctx)
         mk_list_del(&rule->_head);
         flb_free(rule);
     }
+
+    mk_list_foreach_safe(head, tmp, &ctx->copy_key_rules) {
+        rule = mk_list_entry(head, struct modify_rule, _head);
+        flb_free(rule->key);
+        flb_free(rule->val);
+        mk_list_del(&rule->_head);
+        flb_free(rule);
+    }
 }
 
 static void helper_pack_string(msgpack_packer * packer, const char *str)
@@ -67,10 +75,12 @@ static int setup(struct filter_modify_ctx *ctx,
                  struct flb_filter_instance *f_ins, struct flb_config *config)
 {
     struct mk_list *head;
+    struct mk_list *head_b;
     struct mk_list *split;
     struct flb_split_entry *sentry;
     struct flb_config_prop *prop;
     struct modify_rule *rule;
+    struct modify_rule *rule_b;
 
     mk_list_foreach(head, &f_ins->properties) {
         prop = mk_list_entry(head, struct flb_config_prop, _head);
@@ -109,12 +119,29 @@ static int setup(struct filter_modify_ctx *ctx,
             ctx->add_key_rules_cnt++;
             mk_list_add(&rule->_head, &ctx->add_key_rules);
         }
+        else if (strcasecmp(prop->key, "copy") == 0) {
+            ctx->copy_key_rules_cnt++;
+            mk_list_add(&rule->_head, &ctx->copy_key_rules);
+        }
         else {
             teardown(ctx);
             flb_free(rule);
             return -1;
         }
 
+    }
+
+    mk_list_foreach(head, &ctx->add_key_rules) {
+      rule = mk_list_entry(head, struct modify_rule, _head);
+      mk_list_foreach(head_b, &ctx->add_key_rules) {
+        rule_b = mk_list_entry(head, struct modify_rule, _head);
+
+        if (strncmp(rule->key, rule_b->key, strlen(rule->key)) == 0) {
+          flb_error("[filter_modiify] : 'copy' and 'add_if_not_present' rules both exist for key '%s'", rule->key);
+          teardown(ctx);
+          return -1;
+        }
+      }
     }
 
     return 0;
@@ -183,6 +210,35 @@ static inline int count_rules_not_matched(msgpack_object * map,
     return counter;
 }
 
+static inline void pack_map_with_copy(msgpack_packer * packer,
+                                        msgpack_object * map,
+                                        struct mk_list *rules)
+{
+    int i;
+    struct mk_list *head;
+    struct modify_rule *rule;
+    struct modify_rule *matched_rule;
+    bool matched;
+
+    for (i = 0; i < map->via.map.size; i++) {
+
+        matched = false;
+
+        mk_list_foreach(head, rules) {
+            rule = mk_list_entry(head, struct modify_rule, _head);
+            if (kv_key_matches(&map->via.map.ptr[i], rule)) {
+                matched = true;
+                matched_rule = rule;
+            }
+        }
+
+        if (matched) {
+            helper_pack_string(packer, matched_rule->val);
+            msgpack_pack_object(packer, map->via.map.ptr[i].val);
+        }
+    }
+}
+
 static inline void pack_map_with_rename(msgpack_packer * packer,
                                         msgpack_object * map,
                                         struct mk_list *rules)
@@ -244,7 +300,9 @@ static inline void apply_modifying_rules(msgpack_packer * packer,
     // return without rewriting
 
     int total_records =
-        map.via.map.size + count_rules_not_matched(&map, &ctx->add_key_rules);
+        map.via.map.size + 
+            count_rules_not_matched(&map, &ctx->add_key_rules) +
+            &ctx->copy_key_rules_cnt;
 
     // * Record array init(2)
     msgpack_pack_array(packer, 2);
@@ -260,9 +318,15 @@ static inline void apply_modifying_rules(msgpack_packer * packer,
     msgpack_pack_map(packer, total_records);
 
     // * * * Add from input map to new map with items renamed
+    // This adds all existing records, renamed where matched
     pack_map_with_rename(packer, &map, &ctx->rename_key_rules);
 
+    // * * * Add from input map to new map with items copied
+    // This only adds copies
+    pack_map_with_copy(packer, &map, &ctx->copy_key_rules);
+
     // * * * Add missing keys with defaults to new map
+    // This only add missing defaults
     pack_map_with_missing_keys(packer, &map, &ctx->add_key_rules);
 
 }

@@ -21,8 +21,10 @@ struct filter_modify_ctx
 {
     int add_key_rules_cnt;
     int rename_key_rules_cnt;
+    int copy_key_rules_cnt;
     struct mk_list add_key_rules;
     struct mk_list rename_key_rules;
+    struct mk_list copy_key_rules;
 };
 
 struct modify_rule
