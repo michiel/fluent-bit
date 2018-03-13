@@ -124,6 +124,8 @@ static int setup(struct filter_modify_ctx *ctx,
             mk_list_add(&rule->_head, &ctx->copy_key_rules);
         }
         else {
+            flb_error
+                ("[filter_modify] invalid configuration key '%s'", prop->key);
             teardown(ctx);
             flb_free(rule);
             return -1;
@@ -131,12 +133,17 @@ static int setup(struct filter_modify_ctx *ctx,
 
     }
 
+    // Check for 'add' and 'copy' both trying to create the same key
+
     mk_list_foreach(head, &ctx->add_key_rules) {
       rule = mk_list_entry(head, struct modify_rule, _head);
-      mk_list_foreach(head_b, &ctx->add_key_rules) {
+
+      mk_list_foreach(head_b, &ctx->copy_key_rules) {
         rule_b = mk_list_entry(head, struct modify_rule, _head);
 
-        if (strncmp(rule->key, rule_b->key, strlen(rule->key)) == 0) {
+        flb_info("{FM} comparing %s with %s", rule->key, rule_b->val);
+
+        if (strncmp(rule->key, rule_b->val, strlen(rule->key)) == 0) {
           flb_error("[filter_modiify] : 'copy' and 'add_if_not_present' rules both exist for key '%s'", rule->key);
           teardown(ctx);
           return -1;
@@ -345,6 +352,7 @@ static int cb_modify_init(struct flb_filter_instance *f_ins,
 
     mk_list_init(&ctx->rename_key_rules);
     mk_list_init(&ctx->add_key_rules);
+    mk_list_init(&ctx->copy_key_rules);
 
     if (setup(ctx, f_ins, config) < 0) {
         flb_free(ctx);
