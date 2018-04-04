@@ -44,6 +44,7 @@ static int configure(struct filter_nest_ctx *ctx,
     tmp = flb_filter_get_property("Nest_under", f_ins);
     if (tmp) {
         ctx->nesting_key = flb_strdup(tmp);
+        ctx->nesting_key_len = strlen(tmp);
     }
     else {
         flb_error("[filter_parser] Key \"Nest_under\" is missing\n");
@@ -73,13 +74,12 @@ static int configure(struct filter_nest_ctx *ctx,
     return 0;
 }
 
-static void helper_pack_string(msgpack_packer *packer, const char *str)
+static void helper_pack_string(msgpack_packer *packer, const char *str, int len)
 {
     if (str == NULL) {
         msgpack_pack_nil(packer);
     }
     else {
-        int len = (int) strlen(str);
         msgpack_pack_str(packer, len);
         msgpack_pack_str_body(packer, str, len);
     }
@@ -186,7 +186,7 @@ static inline void apply_nesting_rules(msgpack_packer * packer,
     map_pack_each_if(packer, &map, ctx, &is_not_kv_to_nest);
 
     // * * * Pack the nested map key
-    helper_pack_string(packer, ctx->nesting_key);
+    helper_pack_string(packer, ctx->nesting_key, ctx->nesting_key_len);
 
     // * * * Create the nest map value
     msgpack_pack_map(packer, items_to_nest_count);
