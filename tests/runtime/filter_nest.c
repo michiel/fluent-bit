@@ -80,7 +80,7 @@ void flb_test_filter_nest_single(void)
     TEST_CHECK_(output != NULL, "Expected output to not be NULL");
 
     if (output != NULL) {
-        expected = "\"tonest\":\"{\"to_nest\":\"This is the data to nest\"}\"";
+        expected = "\"nested_key\":\"{\"to_nest\":\"This is the data to nest\"}\"";
         TEST_CHECK_(strstr(output, expected) != NULL, "Expected output to contain '%s', got '%s'", expected, output);
         free(output);
     }

@@ -44,7 +44,6 @@ static int configure(struct filter_nest_ctx *ctx,
     tmp = flb_filter_get_property("Nest_under", f_ins);
     if (tmp) {
         ctx->nesting_key = flb_strdup(tmp);
-        ctx->nesting_key_len = strlen(tmp);
     }
     else {
         flb_error("[filter_parser] Key \"Nest_under\" is missing\n");
@@ -74,7 +73,7 @@ static int configure(struct filter_nest_ctx *ctx,
     return 0;
 }
 
-static void helper_pack_string(msgpack_packer * packer, const char *str)
+static void helper_pack_string(msgpack_packer *packer, const char *str)
 {
     if (str == NULL) {
         msgpack_pack_nil(packer);
@@ -103,7 +102,7 @@ static inline void map_pack_each_if(msgpack_packer * packer,
     }
 }
 
-static inline int map_count(msgpack_object * map,
+static inline int map_count_if(msgpack_object * map,
                             struct filter_nest_ctx *ctx,
                             bool(*f) (msgpack_object_kv * kv,
                                       struct filter_nest_ctx * ctx)
@@ -149,7 +148,7 @@ static inline bool is_kv_to_nest(msgpack_object_kv * kv,
     else {
         // This will positively match "ABC" with wildcard "ABC" 
         return ((ctx->wildcard_len == klen) &&
-                (strncmp(key, ctx->wildcard, ctx->wildcard_len) == 0)
+                (strncmp(key, ctx->wildcard, klen) == 0)
             );
     }
 }
@@ -173,7 +172,7 @@ static inline void apply_nesting_rules(msgpack_packer * packer,
     // * * Record array item 1/2
     msgpack_pack_object(packer, ts);
 
-    size_t items_to_nest_count = map_count(&map, ctx, &is_kv_to_nest);
+    size_t items_to_nest_count = map_count_if(&map, ctx, &is_kv_to_nest);
     size_t items_toplevel_count =
         (map.via.map.size - items_to_nest_count + 1);
 
@@ -242,8 +241,8 @@ static int cb_nest_filter(void *data, size_t bytes,
 
     // Records come in the format,
     //
-    // [ TIMESTAMP, { K1:V1, K2:V2, ...} ], 
-    // [ TIMESTAMP, { K1:V1, K2:V2, ...} ]
+    // [ TIMESTAMP, { K1=>V1, K2=>V2, ...} ],
+    // [ TIMESTAMP, { K1=>V1, K2=>V2, ...} ]
     //
     // Example record,
     // [1123123, {"Mem.total"=>4050908, "Mem.used"=>476576, "Mem.free"=>3574332 } ]

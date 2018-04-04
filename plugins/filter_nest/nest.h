@@ -23,7 +23,6 @@
 struct filter_nest_ctx
 {
     char *nesting_key;
-    int nesting_key_len;
     char *wildcard;
     int wildcard_len;
     bool wildcard_is_dynamic;
