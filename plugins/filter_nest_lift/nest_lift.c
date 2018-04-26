@@ -143,6 +143,52 @@ static inline int map_count_if(msgpack_object * map,
     return count;
 }
 
+static inline int count_items_to_lift(msgpack_object * map,
+                            struct filter_nest_lift_ctx *ctx
+                            )
+{
+    int i;
+    int count = 0;
+
+    for (i = 0; i < map->via.map.size; i++) {
+        if (is_kv_to_lift(&map->via.map.ptr[i], ctx)) {
+            count = count + map->via.map.size;
+        }
+    }
+    return count;
+}
+
+static inline void pack_map(msgpack_packer * packer, msgpack_object * map,
+    struct filter_nest_lift_ctx *ctx
+    ) {
+    int i;
+    for (i = 0; i < map->via.map.size; i++) {
+      if (ctx->use_prefix) {
+        msgpack_pack_object(packer, map->via.map.ptr[i].key);
+      } else {
+        msgpack_pack_object(packer, map->via.map.ptr[i].key);
+      }
+      msgpack_pack_object(packer, map->via.map.ptr[i].val);
+    }
+}
+
+static inline void map_lift_each_if(
+    msgpack_packer * packer,
+    msgpack_object * map,
+    struct filter_nest_lift_ctx *ctx,
+    bool(*f) (msgpack_object_kv * kv,
+      struct filter_nest_lift_ctx * ctx)
+    )
+{
+    int i;
+
+    for (i = 0; i < map->via.map.size; i++) {
+        if ((*f) (&map->via.map.ptr[i], ctx)) {
+            pack_map(packer, map, ctx);
+        }
+    }
+}
+
 static inline void apply_nest_lifting_rules(msgpack_packer * packer,
                                        msgpack_object * root,
                                        struct filter_nest_lift_ctx *ctx)
@@ -156,41 +202,22 @@ static inline void apply_nest_lifting_rules(msgpack_packer * packer,
     // * * Record array item 1/2
     msgpack_pack_object(packer, ts);
 
-    /*
-    int i;
-
-    for (i = 0; i < map->via.map.size; i++) {
-      msgpack_object *obj = &kv->key;
-      if ((*f) (&map->via.map.ptr[i], ctx)) {
-        count++;
-      }
-    }
-    */
-
-    size_t keys_to_lift_from_count = map_count_if(&map, ctx, &is_kv_to_lift);
-    size_t items_toplevel_count =
-      (map.via.map.size - keys_to_lift_from_count + 0);
+    int items_toplevel_count =
+      (map.via.map.size - map_count_if(&map, ctx, &is_kv_to_lift)) +
+       count_items_to_lift(&map, ctx);
 
     flb_debug ("[filter_nest_lift] Outer map size %d elements",
         items_toplevel_count);
 
     // * * Record array item 2/2
     // * * Create a new map with toplevel ( current items -1 ) + (size of map to lift)
-    msgpack_pack_map(packer, items_toplevel_count);
+    msgpack_pack_map(packer, (size_t) items_toplevel_count);
 
     // * * Pack all current top-level items
     map_pack_each_if(packer, &map, ctx, &is_not_kv_to_lift);
 
-    /*
-    // * * * Lift the map (if any)
-    helper_pack_string(packer, ctx->lift_, ctx->nesting_key_len);
-
-    // * * * Create the nest map value
-    msgpack_pack_map(packer, items_to_nest_count);
-
-    // * * * * Pack the nested items
-    map_pack_each_if(packer, &map, ctx, &is_kv_to_lift);
-    */
+    // * * Lift and pack all pairs in matching key
+    map_lift_each_if(packer, &map, ctx, &is_kv_to_lift);
 }
 
 static int cb_nest_lift_init(struct flb_filter_instance *f_ins,
