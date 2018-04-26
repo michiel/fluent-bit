@@ -17,16 +17,16 @@
  *  limitations under the License.
  */
 
-#ifndef FLB_FILTER_NEST_H
-#define FLB_FILTER_NEST_H
+#ifndef FLB_FILTER_NEST_LIFT_H
+#define FLB_FILTER_NEST_LIFT_H
 
-struct filter_nest_ctx
+struct filter_nest_lift_ctx
 {
-    char *nesting_key;
-    int nesting_key_len;
-    char *wildcard;
-    int wildcard_len;
-    bool wildcard_is_dynamic;
+    char *nested_under;
+    int nested_under_len;;
+    char *prefix_with;
+    int prefix_wiht_len;
+    bool use_prefix;
 };
 
 #endif

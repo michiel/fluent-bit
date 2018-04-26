@@ -29,7 +29,7 @@
 #include <fluent-bit/flb_pack.h>
 #include <msgpack.h>
 
-#include "nest.h"
+#include "nest_lift.h"
 
 static int configure(struct filter_nest_ctx *ctx,
                      struct flb_filter_instance *f_ins,
@@ -37,38 +37,37 @@ static int configure(struct filter_nest_ctx *ctx,
 {
     char *tmp;
 
-    ctx->nesting_key = NULL;
-    ctx->wildcard = NULL;
+    ctx->nested_under = NULL;
+    ctx->prefix_with = NULL;
 
-    // Nest key name
-    tmp = flb_filter_get_property("Nest_under", f_ins);
+    tmp = flb_filter_get_property("nested_under", f_ins);
     if (tmp) {
-        ctx->nesting_key = flb_strdup(tmp);
-        ctx->nesting_key_len = strlen(tmp);
+        ctx->nested_under = flb_strdup(tmp);
+        ctx->nested_under_len = strlen(tmp);
     }
     else {
-        flb_error("[filter_parser] Key \"Nest_under\" is missing\n");
+        flb_error("[filter_nest_up] Key \"nested_under\" is missing\n");
         return -1;
     }
 
-    // Wildcard key name
-    tmp = flb_filter_get_property("Wildcard", f_ins);
-    if (tmp) {
+    tmp = flb_filter_get_property("use_prefix", f_ins);
+    if (tmp != NULL) {
+        ctx->use_prefix = flb_utils_bool(tmp);
+    } else {
+        ctx->use_prefix = FLB_FALSE;
+    }
+
+    tmp = flb_filter_get_property("prefix_with", f_ins);
+    if (tmp != NULL) {
         ctx->wildcard = flb_strdup(tmp);
         ctx->wildcard_len = strlen(tmp);
-
-        if (ctx->wildcard[ctx->wildcard_len - 1] == '*') {
-            ctx->wildcard_is_dynamic = FLB_TRUE;
-            ctx->wildcard_len--;
-        }
-        else {
-            ctx->wildcard_is_dynamic = FLB_FALSE;
-        }
-
     }
     else {
-        flb_error("[filter_parser] Key \"Wildcard\" is missing\n");
-        return -1;
+        if (ctx->use_prefix) {
+          flb_error("[filter_nest_up] use_prefix is true, but no prefix found in config. Disabling.\n");
+        }
+        ctx->wildcard = NULL;
+        ctx->wildcard_len = 0;
     }
 
     return 0;
