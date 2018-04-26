@@ -128,7 +128,7 @@ static inline bool is_not_kv_to_lift(msgpack_object_kv * kv,
     return !is_kv_to_lift(kv, ctx);
 }
 
-static inline int map_count_if(msgpack_object * map,
+static inline int map_count_fn(msgpack_object * map,
                                struct filter_nest_lift_ctx *ctx,
                                bool(*f) (msgpack_object_kv * kv,
                                          struct filter_nest_lift_ctx * ctx)
@@ -205,7 +205,7 @@ static inline void apply_nest_lifting_rules(msgpack_packer * packer,
     //   - number of maps to lift
     //   + number of element inside maps to lift
     int items_toplevel_count =
-        (map.via.map.size - map_count_if(&map, ctx, &is_kv_to_lift)) +
+        (map.via.map.size - map_count_fn(&map, ctx, &is_kv_to_lift)) +
         count_items_to_lift(&map, ctx);
 
     flb_debug("[filter_nest_lift] Outer map size %d elements",
