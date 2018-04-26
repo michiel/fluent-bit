@@ -23,9 +23,9 @@
 struct filter_nest_lift_ctx
 {
     char *nested_under;
-    int nested_under_len;;
+    int nested_under_len;
     char *prefix_with;
-    int prefix_wiht_len;
+    int prefix_with_len;
     bool use_prefix;
 };
 
