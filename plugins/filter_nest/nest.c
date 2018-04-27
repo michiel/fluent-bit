@@ -278,14 +278,37 @@ static inline void pack_map(msgpack_packer * packer, msgpack_object * map,
                             struct filter_nest_ctx *ctx)
 {
     int i;
+    int size;
+    char *buf;
+    bool run = true;
+
+    msgpack_object *key;
+
     for (i = 0; i < map->via.map.size; i++) {
+        key = &map->via.map.ptr[i].key;
+
         if (ctx->use_prefix) {
-            msgpack_pack_object(packer, map->via.map.ptr[i].key);
+            size = ctx->prefix_with_len + key->via.str.size + 1;
+            if (run) {
+              buf = flb_malloc(size);
+              run = false;
+            } else {
+              flb_realloc(buf, size);
+            }
+
+            snprintf(buf, size, "%s%s", ctx->prefix_with, key->via.str.ptr);
+            flb_debug("Lifting with prefix. Source: %s, Prefix: %s, Result: %s:",
+                key->via.str.ptr, ctx->prefix_with, buf);
+            helper_pack_string(packer, buf, size);
         }
         else {
-            msgpack_pack_object(packer, map->via.map.ptr[i].key);
+            msgpack_pack_object(packer, *key);
         }
         msgpack_pack_object(packer, map->via.map.ptr[i].val);
+    }
+
+    if (ctx->use_prefix) {
+      flb_free(buf);
     }
 }
 
@@ -317,6 +340,7 @@ static inline int apply_lifting_rules(msgpack_packer * packer,
     int items_to_lift = map_count_fn(&map, ctx, &is_kv_to_lift);
 
     if (items_to_lift == 0) {
+        flb_debug("[filter_nest] Lift : No match found for %s", ctx->nested_under);
         return 0;
     }
 
@@ -360,6 +384,7 @@ static inline int apply_nesting_rules(msgpack_packer * packer,
     size_t items_to_nest = map_count_fn(&map, ctx, &is_kv_to_nest);
 
     if (items_to_nest == 0) {
+        flb_debug("[filter_nest] Nest : No match found for %s", ctx->wildcard);
         return 0;
     }
 
