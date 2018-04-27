@@ -288,17 +288,14 @@ static inline void pack_map(msgpack_packer * packer, msgpack_object * map,
         key = &map->via.map.ptr[i].key;
 
         if (ctx->use_prefix) {
-            size = ctx->prefix_with_len + key->via.str.size + 1;
+            size = ctx->prefix_with_len + key->via.str.size;
             if (run) {
-              buf = flb_malloc(size);
+              buf = flb_malloc(size + 1);
               run = false;
             } else {
-              flb_realloc(buf, size);
+              flb_realloc(buf, size + 1);
             }
-
-            snprintf(buf, size, "%s%s", ctx->prefix_with, key->via.str.ptr);
-            flb_debug("Lifting with prefix. Source: %s, Prefix: %s, Result: %s:",
-                key->via.str.ptr, ctx->prefix_with, buf);
+            snprintf(buf, size + 1, "%s%s", ctx->prefix_with, key->via.str.ptr);
             helper_pack_string(packer, buf, size);
         }
         else {
