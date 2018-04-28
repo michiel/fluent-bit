@@ -79,7 +79,7 @@ static int setup(struct filter_modify_ctx *ctx,
         split = flb_utils_split(prop->val, ' ', 1);
         if (mk_list_size(split) != 2) {
             flb_error
-                ("[filter_modify] invalid value, expected key and value");
+                ("[filter_modify] Invalid value for operation %s, expected key and value", prop->val);
             teardown(ctx);
             flb_free(rule);
             flb_utils_split_free(split);
@@ -555,33 +555,26 @@ static inline void apply_modifying_rules(msgpack_packer * packer,
     struct mk_list *tmp;
     struct mk_list *head;
 
+    msgpack_sbuffer_init(&buffer);
+    msgpack_zone_init(&mempool, 8092 * 16);
+    msgpack_packer_init(&loop_packer, &buffer, msgpack_sbuffer_write);
+
     mk_list_foreach_safe(head, tmp, &ctx->rules) {
         rule = mk_list_entry(head, struct modify_rule, _head);
-        flb_info("[modify_filter] GOT RULE K/V %s/%s", rule->key, rule->val);
 
-        msgpack_sbuffer_init(&buffer);
-        msgpack_packer_init(&loop_packer, &buffer, msgpack_sbuffer_write);
-
+        msgpack_sbuffer_clear(&buffer);
         if (apply_modifying_rule(&loop_packer, &map, rule) !=
             FLB_FILTER_NOTOUCH) {
-            msgpack_zone_init(&mempool, buffer.size * 16);
             msgpack_unpack(buffer.data, buffer.size, NULL, &mempool,
                            &deserialized);
-            msgpack_zone_destroy(&mempool);
 
             if (deserialized.type == MSGPACK_OBJECT_MAP) {
-                flb_free(&map);
                 map = deserialized;;
-                flb_info("[modify_filter] CHANGE : WE GOOD");
             }
             else {
-                flb_error("[modify_filter] Expected MAP, skipping");
+                flb_error("[modify_filter] Expected MSGPACK_MAP, this is not a valid return value");
             }
         }
-        else {
-            flb_info("[modify_filter] NOCHANGE IS GOODCHANGE YO");
-        }
-        msgpack_sbuffer_destroy(&buffer);
     }
 
     // * Record array init(2)
@@ -597,6 +590,9 @@ static inline void apply_modifying_rules(msgpack_packer * packer,
     // * * Record array item 2/2
     msgpack_pack_map(packer, map.via.map.size);
     map_pack_each(packer, &map);
+
+    msgpack_sbuffer_destroy(&buffer);
+    msgpack_zone_destroy(&mempool);
 
 }
 
