@@ -20,13 +20,26 @@
 #ifndef FLB_FILTER_NEST_H
 #define FLB_FILTER_NEST_H
 
+enum FILTER_NEST_OPERATION {
+  NEST,
+  LIFT
+};
+
 struct filter_nest_ctx
 {
+    enum FILTER_NEST_OPERATION operation;
+    // nest
     char *nesting_key;
     int nesting_key_len;
     char *wildcard;
     int wildcard_len;
     bool wildcard_is_dynamic;
+    // lift
+    char *nested_under;
+    int nested_under_len;
+    char *prefix_with;
+    int prefix_with_len;
+    bool use_prefix;
 };
 
 #endif
