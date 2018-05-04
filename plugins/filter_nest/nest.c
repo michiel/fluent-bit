@@ -280,7 +280,6 @@ static inline void pack_map(msgpack_packer * packer, msgpack_object * map,
     int i;
     int size;
     char *buf;
-    bool run = true;
 
     msgpack_object *key;
 
@@ -289,23 +288,15 @@ static inline void pack_map(msgpack_packer * packer, msgpack_object * map,
 
         if (ctx->use_prefix) {
             size = ctx->prefix_with_len + key->via.str.size;
-            if (run) {
-              buf = flb_malloc(size + 1);
-              run = false;
-            } else {
-              flb_realloc(buf, size + 1);
-            }
+            buf = flb_malloc(size + 1);
             snprintf(buf, size + 1, "%s%s", ctx->prefix_with, key->via.str.ptr);
             helper_pack_string(packer, buf, size);
+            flb_free(buf);
         }
         else {
             msgpack_pack_object(packer, *key);
         }
         msgpack_pack_object(packer, map->via.map.ptr[i].val);
-    }
-
-    if (ctx->use_prefix) {
-      flb_free(buf);
     }
 }
 
