@@ -368,10 +368,11 @@ static inline void apply_rule_ADD(msgpack_packer * packer,
         helper_pack_string(packer, rule->val, matched_rule->val_len);
     }
     else {
-        // XXX pack map
         flb_info
             ("[filter_modify] Rule ADD %s : this key already exists, skipping",
              rule->key);
+        msgpack_pack_map(packer, map.via.map.size);
+        map_pack(packer, map);
     }
 }
 
@@ -430,25 +431,24 @@ static inline void apply_modifying_rules(msgpack_packer * packer,
 {
     msgpack_object ts = root->via.array.ptr[0];
     msgpack_object map = root->via.array.ptr[1];
+
+    int records_in = map.via.map.size;
+
     struct modify_rule *rule;
-    void *swap;
 
+    msgpack_sbuffer buffer;
+    msgpack_sbuffer_init(&buffer);
 
+    msgpack_packer packer;
+    msgpack_packer_init(&packer, &buffer, msgpack_sbuffer_write);
 
-    msgpack_sbuffer in_buffer;
-
-    msgpack_sbuffer_init(&in_buffer);
-
-    msgpack_packer in_packer;
-    msgpack_packer_init(&in_packer, &in_buffer, msgpack_sbuffer_write);
+    msgpack_unpacked result;
+    msgpack_unpacked_init(&result);
 
     mk_list_foreach_safe(head, tmp, &ctx->rules) {
         rule = mk_list_entry(head, struct modify_rule, _head);
-        apply_modifying_rule(packer, XXX, rule);
-
+        apply_modifying_rule(packer, map, rule);
     }
-
-    int records_in = map.via.map.size;
 
     // * Record array init(2)
     msgpack_pack_array(packer, 2);
