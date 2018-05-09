@@ -38,7 +38,7 @@ enum FLB_FILTER_MODIFY_RULETYPE {
 	RENAME,
 	HARDRENAME,
 	REMOVE
-}
+};
 
 struct filter_modify_ctx
 {
