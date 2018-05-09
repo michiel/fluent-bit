@@ -44,7 +44,6 @@ static void teardown(struct filter_modify_ctx *ctx)
         mk_list_del(&rule->_head);
         flb_free(rule);
     }
-
 }
 
 static void helper_pack_string(msgpack_packer * packer, const char *str,
@@ -126,7 +125,6 @@ static int setup(struct filter_modify_ctx *ctx,
 
         mk_list_add(&rule->_head, &ctx->rules);
         ctx->rules_cnt++;
-
     }
 
     return 0;
@@ -157,7 +155,7 @@ static inline bool kv_key_matches_rule_key(msgpack_object_kv * kv,
         );
 }
 
-static inline bool not_kv_key_matches_rule_key(msgpack_object_kv * kv,
+static inline bool kv_key_does_not_match_rule_key(msgpack_object_kv * kv,
                                                struct modify_rule *rule)
 {
     return !kv_key_matches_rule_key(kv, rule);
@@ -187,13 +185,13 @@ static inline bool kv_key_matches_rule_val(msgpack_object_kv * kv,
         );
 }
 
-static inline bool not_kv_key_matches_rule_val(msgpack_object_kv * kv,
+static inline bool kv_key_does_not_match_rule_val(msgpack_object_kv * kv,
                                                struct modify_rule *rule)
 {
     return !kv_key_matches_rule_val(kv, rule);
 }
 
-static inline int map_count_keys_maching_rule_key(msgpack_object * map,
+static inline int map_count_keys_matching_rule_key(msgpack_object * map,
                                                   struct modify_rule *rule)
 {
     int i;
@@ -207,7 +205,21 @@ static inline int map_count_keys_maching_rule_key(msgpack_object * map,
     return count;
 }
 
-static inline int map_count_keys_maching_rule_val(msgpack_object * map,
+static inline int map_count_keys_not_matching_rule_key(msgpack_object * map,
+                                                  struct modify_rule *rule)
+{
+    int i;
+    int count = 0;
+
+    for (i = 0; i < map->via.map.size; i++) {
+        if (!kv_key_matches_rule_key(&map->via.map.ptr[i], rule)) {
+            count++;
+        }
+    }
+    return count;
+}
+
+static inline int map_count_keys_matching_rule_val(msgpack_object * map,
                                                   struct modify_rule *rule)
 {
     int i;
@@ -215,6 +227,20 @@ static inline int map_count_keys_maching_rule_val(msgpack_object * map,
 
     for (i = 0; i < map->via.map.size; i++) {
         if (kv_key_matches_rule_val(&map->via.map.ptr[i], rule)) {
+            count++;
+        }
+    }
+    return count;
+}
+
+static inline int map_count_keys_not_matching_rule_val(msgpack_object * map,
+                                                  struct modify_rule *rule)
+{
+    int i;
+    int count = 0;
+
+    for (i = 0; i < map->via.map.size; i++) {
+        if (!kv_key_matches_rule_val(&map->via.map.ptr[i], rule)) {
             count++;
         }
     }
@@ -241,12 +267,19 @@ static inline void map_pack_each_fn(msgpack_packer * packer,
 {
     int i;
 
+		flb_info("X");
+
     for (i = 0; i < map->via.map.size; i++) {
         if ((*f) (&map->via.map.ptr[i], rule)) {
+						flb_info("Y1 : %s", map->via.map.ptr[i].key);
             msgpack_pack_object(packer, map->via.map.ptr[i].key);
+						flb_info("Y2");
             msgpack_pack_object(packer, map->via.map.ptr[i].val);
+						flb_info("Y3");
         }
     }
+
+		flb_info("Z");
 }
 
 static inline int map_count_fn(msgpack_object * map,
@@ -266,14 +299,14 @@ static inline int map_count_fn(msgpack_object * map,
     return count;
 }
 
-static inline void apply_rule_RENAME(msgpack_packer * packer,
+static inline int apply_rule_RENAME(msgpack_packer * packer,
                                      msgpack_object * map,
                                      struct modify_rule *rule)
 {
     int i;
 
-    int match_keys = map_count_keys_maching_rule_key(map, rule);
-    int conflict_keys = map_count_keys_maching_rule_val(map, rule);
+    int match_keys = map_count_keys_matching_rule_key(map, rule);
+    int conflict_keys = map_count_keys_matching_rule_val(map, rule);
 
     // RENAME operation does not change the size of the set
     msgpack_pack_map(packer, map->via.map.size);
@@ -302,16 +335,17 @@ static inline void apply_rule_RENAME(msgpack_packer * packer,
         }
     }
 
+    return FLB_FILTER_MODIFIED;
 }
 
-static inline void apply_rule_HARDRENAME(msgpack_packer * packer,
+static inline int apply_rule_HARDRENAME(msgpack_packer * packer,
                                          msgpack_object * map,
                                          struct modify_rule *rule)
 {
     int i;
 
-    int match_keys = map_count_keys_maching_rule_key(map, rule);
-    int conflict_keys = map_count_keys_maching_rule_val(map, rule);
+    int match_keys = map_count_keys_matching_rule_key(map, rule);
+    int conflict_keys = map_count_keys_matching_rule_val(map, rule);
     msgpack_object_kv *kv;
 
     // HARDRENAME operation CAN change the size of the set
@@ -354,69 +388,78 @@ static inline void apply_rule_HARDRENAME(msgpack_packer * packer,
             }
         }
     }
+    return FLB_FILTER_MODIFIED;
 }
 
-static inline void apply_rule_ADD(msgpack_packer * packer,
+static inline int apply_rule_ADD(msgpack_packer * packer,
                                   msgpack_object * map,
                                   struct modify_rule *rule)
 {
-    if (map_count_keys_maching_rule_key(map, rule) == 0) {
+    if (map_count_keys_matching_rule_key(map, rule) == 0) {
         msgpack_pack_map(packer, map->via.map.size + 1);
         map_pack_each(packer, map);
         helper_pack_string(packer, rule->key, rule->key_len);
         helper_pack_string(packer, rule->val, rule->val_len);
+        return FLB_FILTER_MODIFIED;
     }
     else {
         flb_info
             ("[filter_modify] Rule ADD %s : this key already exists, skipping",
              rule->key);
-        msgpack_pack_map(packer, map->via.map.size);
-        map_pack_each(packer, map);
+        return FLB_FILTER_NOTOUCH;
     }
 }
 
-static inline void apply_rule_SET(msgpack_packer * packer,
+static inline int apply_rule_SET(msgpack_packer * packer,
                                   msgpack_object * map,
                                   struct modify_rule *rule)
 {
-    msgpack_pack_map(packer,
-        map->via.map.size -
-        map_count_keys_maching_rule_key(map, rule) +
-        1
-        );
-    map_pack_each_fn(packer, map, rule, not_kv_key_matches_rule_key);
-    helper_pack_string(packer, rule->key, rule->key_len);
-    helper_pack_string(packer, rule->val, rule->val_len);
+    int matches = map_count_keys_matching_rule_key(map, rule);
+
+    msgpack_pack_map(packer, map->via.map.size - matches + 1);
+
+    if (matches == 0) {
+      map_pack_each(packer, map);
+      helper_pack_string(packer, rule->key, rule->key_len);
+      helper_pack_string(packer, rule->val, rule->val_len);
+    }
+    else {
+      map_pack_each_fn(packer, map, rule, kv_key_does_not_match_rule_key);
+      helper_pack_string(packer, rule->key, rule->key_len);
+      helper_pack_string(packer, rule->val, rule->val_len);
+    }
+
+    return FLB_FILTER_MODIFIED;
 }
 
-static inline void apply_rule_REMOVE(msgpack_packer * packer,
+static inline int apply_rule_REMOVE(msgpack_packer * packer,
                                      msgpack_object * map,
                                      struct modify_rule *rule)
 {
-    msgpack_pack_map(packer,
-        map->via.map.size -
-        map_count_keys_maching_rule_key(map, rule)
-        );
-    map_pack_each_fn(packer, map, rule, not_kv_key_matches_rule_key);
+    int matches = map_count_keys_matching_rule_key(map, rule);
+
+    if (matches == 0) {
+      return FLB_FILTER_NOTOUCH;
+    } else {
+      msgpack_pack_map(packer, map->via.map.size - matches);
+      map_pack_each_fn(packer, map, rule, kv_key_does_not_match_rule_key);
+      return FLB_FILTER_MODIFIED;
+    }
 }
 
-static inline void apply_modifying_rule(msgpack_packer * packer,
+static inline int apply_modifying_rule(msgpack_packer * packer,
                                         msgpack_object * map,
                                         struct modify_rule *rule)
 {
     switch (rule->ruletype) {
     case ADD:
-        apply_rule_ADD(packer, map, rule);
-        break;
+        return apply_rule_ADD(packer, map, rule);
     case SET:
-        apply_rule_SET(packer, map, rule);
-        break;
+        return apply_rule_SET(packer, map, rule);
     case RENAME:
-        apply_rule_RENAME(packer, map, rule);
-        break;
+        return apply_rule_RENAME(packer, map, rule);
     case HARDRENAME:
-        apply_rule_HARDRENAME(packer, map, rule);
-        break;
+        return apply_rule_HARDRENAME(packer, map, rule);
 //    case COPY:
 //        apply_rule_COPY(packer, map, rule);
 //        break;
@@ -424,12 +467,12 @@ static inline void apply_modifying_rule(msgpack_packer * packer,
 //        apply_rule_HARDCOPY(packer, map, rule);
 //        break;
     case REMOVE:
-        apply_rule_REMOVE(packer, map, rule);
-        break;
+        return apply_rule_REMOVE(packer, map, rule);
     default:
         flb_warn
             ("[filter_modify] Unknown ruletype for rule with key %s, ignoring",
              rule->key);
+        return FLB_FILTER_MODIFIED;
     }
 }
 
@@ -446,25 +489,31 @@ static inline void apply_modifying_rules(msgpack_packer * packer,
 
     msgpack_sbuffer buffer;
     msgpack_packer loop_packer;
-    msgpack_unpacked result;
-    size_t off = 0;
+		msgpack_zone mempool;
+		msgpack_object deserialized;
 
     struct mk_list *tmp;
     struct mk_list *head;
     mk_list_foreach_safe(head, tmp, &ctx->rules) {
         rule = mk_list_entry(head, struct modify_rule, _head);
+
         msgpack_sbuffer_init(&buffer);
         msgpack_packer_init(&loop_packer, &buffer, msgpack_sbuffer_write);
-        apply_modifying_rule(&loop_packer, &map, rule);
-        msgpack_unpacked_init(&result);
-        msgpack_unpack_next(&result, buffer.data, buffer.size, &off);
-        if (result.data.type == MSGPACK_OBJECT_MAP) {
-          map = result.data;
+        if (apply_modifying_rule(&loop_packer, &map, rule) == FLB_FILTER_MODIFIED) {
+            msgpack_zone_init(&mempool, buffer.size * 2);
+            msgpack_unpack(buffer.data, buffer.size, NULL, &mempool, &deserialized);
+            msgpack_zone_destroy(&mempool);
+
+            if (deserialized.type == MSGPACK_OBJECT_MAP) {
+              map = deserialized;;
+            }
+            else {
+              flb_error("[modify_filter] Expected MAP, skipping");
+            }
+        } else {
+          flb_info("[modify_filter] NO CHANGE : OK");
         }
-        else {
-          flb_error("[modify_filter] Expected MAP, aborting");
-        }
-        msgpack_unpacked_destroy(&result);
+        msgpack_sbuffer_destroy(&buffer);
     }
 
     // * Record array init(2)
