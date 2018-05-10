@@ -108,6 +108,9 @@ static int setup(struct filter_modify_ctx *ctx,
         else if (strcasecmp(prop->key, "set") == 0) {
             rule->ruletype = SET;
         }
+        else if (strcasecmp(prop->key, "remove") == 0) {
+            rule->ruletype = REMOVE;
+        }
         else if (strcasecmp(prop->key, "copy") == 0) {
             rule->ruletype = COPY;
         }
@@ -385,15 +388,20 @@ static inline int apply_rule_COPY(msgpack_packer * packer,
                                   msgpack_object * map,
                                   struct modify_rule *rule)
 {
-    int i;
-
     int match_keys = map_count_keys_matching_rule_key(map, rule);
     int conflict_keys = map_count_keys_matching_rule_val(map, rule);
+    int i;
     msgpack_object_kv *kv;
 
-    if (match_keys == 0) {
+    if (match_keys < 1) {
         flb_info
             ("[filter_modify] Rule COPY %s TO %s : No keys matching %s found, not applying rule",
+             rule->key, rule->val, rule->key);
+        return FLB_FILTER_NOTOUCH;
+    }
+    else if (match_keys > 1) {
+        flb_info
+            ("[filter_modify] Rule COPY %s TO %s : Multiple keys matching %s found, not applying rule",
              rule->key, rule->val, rule->key);
         return FLB_FILTER_NOTOUCH;
     }
@@ -404,8 +412,19 @@ static inline int apply_rule_COPY(msgpack_packer * packer,
         return FLB_FILTER_NOTOUCH;
     }
     else {
-        // XXX: TODO
-        return FLB_FILTER_NOTOUCH;
+        msgpack_pack_map(packer, map->via.map.size + 1);
+        for (i = 0; i < map->via.map.size; i++) {
+            kv = &map->via.map.ptr[i];
+
+            msgpack_pack_object(packer, kv->key);
+            msgpack_pack_object(packer, kv->val);
+
+            if (kv_key_matches_rule_key(kv, rule)) {
+              helper_pack_string(packer, rule->val, rule->val_len);
+              msgpack_pack_object(packer, kv->val);
+            }
+        }
+        return FLB_FILTER_MODIFIED;
     }
 }
 
@@ -419,34 +438,59 @@ static inline int apply_rule_HARDCOPY(msgpack_packer * packer,
     int conflict_keys = map_count_keys_matching_rule_val(map, rule);
     msgpack_object_kv *kv;
 
-    if (match_keys == 0) {
+    if (match_keys < 1) {
         flb_info
             ("[filter_modify] Rule HARDCOPY %s TO %s : No keys matching %s found, not applying rule",
              rule->key, rule->val, rule->key);
         return FLB_FILTER_NOTOUCH;
     }
-    else if (match_keys > 0) {
+    else if (match_keys > 1) {
         flb_warn
             ("[filter_modify] Rule HARDCOPY %s TO %s : Multiple keys matching %s found, not applying rule",
              rule->key, rule->val, rule->key);
         return FLB_FILTER_NOTOUCH;
     }
-    else if (conflict_keys == 1) {
-        flb_warn
-            ("[filter_modify] Rule HARDCOPY %s TO %s : Existing target keys matching %s found, not applying rule",
-             rule->key, rule->val, rule->key);
-        return FLB_FILTER_NOTOUCH;
-    }
     else if (conflict_keys > 1) {
-        // XXX: TODO
         flb_warn
             ("[filter_modify] Rule HARDCOPY %s TO %s : Multiple target keys matching %s found, not applying rule",
-             rule->key, rule->val, rule->key);
+             rule->key, rule->val, rule->val);
         return FLB_FILTER_NOTOUCH;
     }
+    else if (conflict_keys == 0) {
+        msgpack_pack_map(packer, map->via.map.size + 1);
+        for (i = 0; i < map->via.map.size; i++) {
+            kv = &map->via.map.ptr[i];
+            msgpack_pack_object(packer, kv->key);
+            msgpack_pack_object(packer, kv->val);
+
+            // This is our copy
+            if (kv_key_matches_rule_key(kv, rule)) {
+              helper_pack_string(packer, rule->val, rule->val_len);
+              msgpack_pack_object(packer, kv->val);
+            }
+        }
+        return FLB_FILTER_MODIFIED;
+    }
     else {
-        // XXX: TODO
-        return FLB_FILTER_NOTOUCH;
+        msgpack_pack_map(packer, map->via.map.size);
+
+        for (i = 0; i < map->via.map.size; i++) {
+            kv = &map->via.map.ptr[i];
+
+            // Skip the conflict key, we will create a new one
+            if (!kv_key_matches_rule_val(kv, rule)) {
+              msgpack_pack_object(packer, kv->key);
+              msgpack_pack_object(packer, kv->val);
+
+              // This is our copy
+              if (kv_key_matches_rule_key(kv, rule)) {
+                helper_pack_string(packer, rule->val, rule->val_len);
+                msgpack_pack_object(packer, kv->val);
+              }
+            }
+        }
+
+        return FLB_FILTER_MODIFIED;
     }
 }
 
@@ -521,11 +565,9 @@ static inline int apply_modifying_rule(msgpack_packer * packer,
     case HARDRENAME:
         return apply_rule_HARDRENAME(packer, map, rule);
     case COPY:
-        apply_rule_COPY(packer, map, rule);
-        break;
+        return apply_rule_COPY(packer, map, rule);
     case HARDCOPY:
-        apply_rule_HARDCOPY(packer, map, rule);
-        break;
+        return apply_rule_HARDCOPY(packer, map, rule);
     case REMOVE:
         return apply_rule_REMOVE(packer, map, rule);
     default:
@@ -556,7 +598,7 @@ static inline void apply_modifying_rules(msgpack_packer * packer,
     struct mk_list *head;
 
     msgpack_sbuffer_init(&buffer);
-    msgpack_zone_init(&mempool, 8092 * 16);
+    msgpack_zone_init(&mempool, 8192);
     msgpack_packer_init(&loop_packer, &buffer, msgpack_sbuffer_write);
 
     mk_list_foreach_safe(head, tmp, &ctx->rules) {
@@ -565,6 +607,7 @@ static inline void apply_modifying_rules(msgpack_packer * packer,
         msgpack_sbuffer_clear(&buffer);
         if (apply_modifying_rule(&loop_packer, &map, rule) !=
             FLB_FILTER_NOTOUCH) {
+
             msgpack_unpack(buffer.data, buffer.size, NULL, &mempool,
                            &deserialized);
 
