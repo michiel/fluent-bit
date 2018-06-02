@@ -20,20 +20,42 @@
 #ifndef FLB_FILTER_MODIFY_H
 #define FLB_FILTER_MODIFY_H
 
+
+/*
+   - set KEY VALUE : Add a key/value pair, overwrite it if the key already exists
+   - add KEY VALUE : Add a key/value pair, only if the key doesn't exist
+   - copy KEY NEWKEY : Copy KEY:value to NEWKEY:value if NEWKEY doesn't exist
+   - hardcopy KEY NEWKEY: Copy KEY:value to NEWKEY:value even if NEWKEY already exists
+   - rename KEY NEWKEY: Rename KEY to NEWKEY, if NEWKEY doesn't exist
+   - hardrename KEY NEWKEY: Rename KEY to NEWKEY, even if NEWKEY exists
+   - remove KEY: Remove KEY if it exists
+   */
+enum FLB_FILTER_MODIFY_RULETYPE {
+  RENAME,
+  HARD_RENAME,
+  REWRITE,
+  HARD_REWRITE,
+  ADD,
+  SET,
+  REMOVE,
+  REMOVE_REGEX,
+  COPY,
+  HARD_COPY
+};
+
 struct filter_modify_ctx
 {
-    int add_key_rules_cnt;
-    int rename_key_rules_cnt;
-    struct mk_list add_key_rules;
-    struct mk_list rename_key_rules;
+  int rules_cnt;
+  struct mk_list rules;
 };
 
 struct modify_rule
 {
-    int key_len;
-    int val_len;
-    char *key;
-    char *val;
-    struct mk_list _head;
+  enum FLB_FILTER_MODIFY_RULETYPE ruletype;
+  int key_len;
+  int val_len;
+  char *key;
+  char *val;
+  struct mk_list _head;
 };
 #endif
