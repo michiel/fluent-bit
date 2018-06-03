@@ -150,14 +150,12 @@ static int setup(struct filter_modify_ctx *ctx,
     return 0;
 }
 
-static inline bool kv_key_matches_rule_key(msgpack_object_kv * kv,
-                                           struct modify_rule *rule)
+static inline bool helper_msgpack_object_matches_str(msgpack_object * obj,
+                                                     char *str, int len)
 {
 
     char *key;
     int klen;
-
-    msgpack_object *obj = &kv->key;
 
     if (obj->type == MSGPACK_OBJECT_BIN) {
         key = (char *) obj->via.bin.ptr;
@@ -171,8 +169,32 @@ static inline bool kv_key_matches_rule_key(msgpack_object_kv * kv,
         return false;
     }
 
-    return ((rule->key_len == klen) && (strncmp(rule->key, key, klen) == 0)
+    return ((len == klen) && (strncmp(str, key, klen) == 0)
         );
+}
+
+static inline bool kv_key_matches_str(msgpack_object_kv * kv,
+                                      char *str, int len)
+{
+    return helper_msgpack_object_matches_str(&kv->key, str, len);
+}
+
+static inline bool kv_val_matches_str(msgpack_object_kv * kv,
+                                      char *str, int len)
+{
+    return helper_msgpack_object_matches_str(&kv->val, str, len);
+}
+
+static inline bool kv_key_does_not_match_str(msgpack_object_kv * kv,
+                                             char *str, int len)
+{
+    return !kv_key_matches_str(kv, str, len);
+}
+
+static inline bool kv_key_matches_rule_key(msgpack_object_kv * kv,
+                                           struct modify_rule *rule)
+{
+    return kv_key_matches_str(kv, rule->key, rule->key_len);
 }
 
 static inline bool kv_key_does_not_match_rule_key(msgpack_object_kv * kv,
@@ -184,25 +206,7 @@ static inline bool kv_key_does_not_match_rule_key(msgpack_object_kv * kv,
 static inline bool kv_key_matches_rule_val(msgpack_object_kv * kv,
                                            struct modify_rule *rule)
 {
-    char *key;
-    int klen;
-
-    msgpack_object *obj = &kv->key;
-
-    if (obj->type == MSGPACK_OBJECT_BIN) {
-        key = (char *) obj->via.bin.ptr;
-        klen = obj->via.bin.size;
-    }
-    else if (obj->type == MSGPACK_OBJECT_STR) {
-        key = (char *) obj->via.str.ptr;
-        klen = obj->via.str.size;
-    }
-    else {
-        return false;
-    }
-
-    return ((rule->val_len == klen) && (strncmp(rule->val, key, klen) == 0)
-        );
+    return kv_key_matches_str(kv, rule->val, rule->val_len);
 }
 
 static inline bool kv_key_does_not_match_rule_val(msgpack_object_kv * kv,
@@ -211,62 +215,58 @@ static inline bool kv_key_does_not_match_rule_val(msgpack_object_kv * kv,
     return !kv_key_matches_rule_val(kv, rule);
 }
 
-static inline int map_count_keys_matching_rule_key(msgpack_object * map,
-                                                   struct modify_rule *rule)
+static inline int map_count_keys_matching_str(msgpack_object * map,
+                                              char *str, int len)
 {
     int i;
     int count = 0;
 
     for (i = 0; i < map->via.map.size; i++) {
-        if (kv_key_matches_rule_key(&map->via.map.ptr[i], rule)) {
+        if (kv_key_matches_str(&map->via.map.ptr[i], str, len)) {
             count++;
         }
     }
     return count;
+}
+
+static inline int map_count_keys_not_matching_str(msgpack_object * map,
+                                                  char *str, int len)
+{
+    int i;
+    int count = 0;
+
+    for (i = 0; i < map->via.map.size; i++) {
+        if (!kv_key_matches_str(&map->via.map.ptr[i], str, len)) {
+            count++;
+        }
+    }
+    return count;
+}
+
+static inline int map_count_keys_matching_rule_key(msgpack_object * map,
+                                                   struct modify_rule *rule)
+{
+    return map_count_keys_matching_str(map, rule->key, rule->key_len);
 }
 
 static inline int map_count_keys_not_matching_rule_key(msgpack_object * map,
                                                        struct modify_rule
                                                        *rule)
 {
-    int i;
-    int count = 0;
-
-    for (i = 0; i < map->via.map.size; i++) {
-        if (!kv_key_matches_rule_key(&map->via.map.ptr[i], rule)) {
-            count++;
-        }
-    }
-    return count;
+    return map_count_keys_not_matching_str(map, rule->key, rule->key_len);
 }
 
 static inline int map_count_keys_matching_rule_val(msgpack_object * map,
                                                    struct modify_rule *rule)
 {
-    int i;
-    int count = 0;
-
-    for (i = 0; i < map->via.map.size; i++) {
-        if (kv_key_matches_rule_val(&map->via.map.ptr[i], rule)) {
-            count++;
-        }
-    }
-    return count;
+    return map_count_keys_matching_str(map, rule->val, rule->val_len);
 }
 
 static inline int map_count_keys_not_matching_rule_val(msgpack_object * map,
                                                        struct modify_rule
                                                        *rule)
 {
-    int i;
-    int count = 0;
-
-    for (i = 0; i < map->via.map.size; i++) {
-        if (!kv_key_matches_rule_val(&map->via.map.ptr[i], rule)) {
-            count++;
-        }
-    }
-    return count;
+    return map_count_keys_not_matching_str(map, rule->val, rule->val_len);
 }
 
 static inline void map_pack_each(msgpack_packer * packer,
@@ -661,6 +661,22 @@ static inline void apply_modifying_rules(msgpack_packer * packer,
     msgpack_sbuffer_destroy(&buffer);
     msgpack_zone_destroy(&mempool);
 
+}
+
+static inline bool evaluate_condition_KEY_EXISTS(msgpack_object * map,
+                                                 struct modify_condition
+                                                 *condition)
+{
+    return (map_count_keys_matching_str(map, condition->a, condition->a_len) >
+            0);
+}
+
+static inline bool evaluate_condition_KEY_DOES_NOT_EXIST(msgpack_object * map,
+                                                         struct
+                                                         modify_condition
+                                                         *condition)
+{
+    return !evaluate_condition_KEY_EXISTS(map, condition);
 }
 
 static int cb_modify_init(struct flb_filter_instance *f_ins,

@@ -43,6 +43,13 @@ enum FLB_FILTER_MODIFY_RULETYPE {
   HARD_COPY
 };
 
+enum FLB_FILTER_MODIFY_CONDITIONTYPE {
+  KEY_EXISTS,
+  KEY_DOES_NOT_EXIST,
+  KEY_VALUE_EQUALS,
+  KEY_VALUE_DOES_NOT_EQUAL
+};
+
 struct filter_modify_ctx
 {
   int rules_cnt;
@@ -56,6 +63,16 @@ struct modify_rule
   int val_len;
   char *key;
   char *val;
+  struct mk_list _head;
+};
+
+struct modify_condition
+{
+  enum FLB_FILTER_MODIFY_CONDITIONTYPE conditiontype;
+  int a_len;
+  int b_len;
+  char *a;
+  char *b;
   struct mk_list _head;
 };
 #endif
