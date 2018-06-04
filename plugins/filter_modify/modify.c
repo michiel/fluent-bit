@@ -118,7 +118,8 @@ static int setup(struct filter_modify_ctx *ctx,
 
             condition = flb_malloc(sizeof(struct modify_condition));
             if (!condition) {
-                flb_error("[filter_modify] Unable to allocate memory for condition");
+                flb_error
+                    ("[filter_modify] Unable to allocate memory for condition");
                 teardown(ctx);
                 flb_free(condition);
                 flb_utils_split_free(split);
@@ -130,11 +131,18 @@ static int setup(struct filter_modify_ctx *ctx,
 
             sentry =
                 mk_list_entry_first(split, struct flb_split_entry, _head);
+
             if (strcasecmp(sentry->value, "key_exists") == 0) {
                 condition->conditiontype = KEY_EXISTS;
             }
             else if (strcasecmp(sentry->value, "key_does_not_exist") == 0) {
                 condition->conditiontype = KEY_DOES_NOT_EXIST;
+            }
+            else if (strcasecmp(sentry->value, "key_value_equals") == 0) {
+                condition->conditiontype = KEY_VALUE_EQUALS;
+            }
+            else if (strcasecmp(sentry->value, "key_value_does_not_equal") == 0) {
+                condition->conditiontype = KEY_VALUE_DOES_NOT_EQUAL;
             }
             else {
                 flb_error("[filter_modify] Invalid config for %s : %s",
@@ -179,7 +187,8 @@ static int setup(struct filter_modify_ctx *ctx,
 
             rule = flb_malloc(sizeof(struct modify_rule));
             if (!rule) {
-                flb_error("[filter_modify] Unable to allocate memory for rule");
+                flb_error
+                    ("[filter_modify] Unable to allocate memory for rule");
                 teardown(ctx);
                 flb_free(condition);
                 flb_utils_split_free(split);
@@ -360,32 +369,6 @@ static inline int map_count_keys_not_matching_str(msgpack_object * map,
     return count;
 }
 
-static inline int map_count_keys_matching_rule_key(msgpack_object * map,
-                                                   struct modify_rule *rule)
-{
-    return map_count_keys_matching_str(map, rule->key, rule->key_len);
-}
-
-static inline int map_count_keys_not_matching_rule_key(msgpack_object * map,
-                                                       struct modify_rule
-                                                       *rule)
-{
-    return map_count_keys_not_matching_str(map, rule->key, rule->key_len);
-}
-
-static inline int map_count_keys_matching_rule_val(msgpack_object * map,
-                                                   struct modify_rule *rule)
-{
-    return map_count_keys_matching_str(map, rule->val, rule->val_len);
-}
-
-static inline int map_count_keys_not_matching_rule_val(msgpack_object * map,
-                                                       struct modify_rule
-                                                       *rule)
-{
-    return map_count_keys_not_matching_str(map, rule->val, rule->val_len);
-}
-
 static inline void map_pack_each(msgpack_packer * packer,
                                  msgpack_object * map)
 {
@@ -447,6 +430,38 @@ static inline bool evaluate_condition_KEY_DOES_NOT_EXIST(msgpack_object * map,
     return !evaluate_condition_KEY_EXISTS(map, condition);
 }
 
+static inline bool evaluate_condition_KEY_VALUE_EQUALS(msgpack_object * map,
+                                                       struct
+                                                       modify_condition
+                                                       *condition)
+{
+    int i;
+    bool match = false;
+    msgpack_object_kv *kv;
+
+    for (i = 0; i < map->via.map.size; i++) {
+        kv = &map->via.map.ptr[i];
+        flb_error("Matching key to %s", condition->a);
+        if (kv_key_matches_str(kv, condition->a, condition->a_len)) {
+            flb_error("\tMatching val to %s", condition->b);
+            if (kv_val_matches_str(kv, condition->b, condition->b_len)) {
+                flb_error("\t\t - We have a match");
+                match = true;
+            }
+        }
+    }
+    return match;
+}
+
+static inline bool evaluate_condition_KEY_VALUE_DOES_NOT_EQUAL(msgpack_object
+                                                               * map,
+                                                               struct
+                                                               modify_condition
+                                                               *condition)
+{
+    return !evaluate_condition_KEY_VALUE_EQUALS(map, condition);
+}
+
 static inline bool evaluate_condition(msgpack_object * map,
                                       struct modify_condition *condition)
 {
@@ -455,6 +470,10 @@ static inline bool evaluate_condition(msgpack_object * map,
         return evaluate_condition_KEY_EXISTS(map, condition);
     case KEY_DOES_NOT_EXIST:
         return evaluate_condition_KEY_DOES_NOT_EXIST(map, condition);
+    case KEY_VALUE_EQUALS:
+        return evaluate_condition_KEY_VALUE_EQUALS(map, condition);
+    case KEY_VALUE_DOES_NOT_EQUAL:
+        return evaluate_condition_KEY_VALUE_DOES_NOT_EQUAL(map, condition);
     default:
         flb_warn
             ("[filter_modify] Unknown conditiontype for condition %s, assuming result FAILED TO MEET CONDITION",
@@ -475,7 +494,8 @@ static inline bool evaluate_conditions(msgpack_object * map,
     mk_list_foreach_safe(head, tmp, &ctx->conditions) {
         condition = mk_list_entry(head, struct modify_condition, _head);
         if (!evaluate_condition(map, condition)) {
-            flb_debug("[filter_modify] : Condition not met : %s", condition->raw_v);
+            flb_debug("[filter_modify] : Condition not met : %s",
+                      condition->raw_v);
             ok = false;
         }
     }
@@ -489,8 +509,10 @@ static inline int apply_rule_RENAME(msgpack_packer * packer,
 {
     int i;
 
-    int match_keys = map_count_keys_matching_rule_key(map, rule);
-    int conflict_keys = map_count_keys_matching_rule_val(map, rule);
+    int match_keys =
+        map_count_keys_matching_str(map, rule->key, rule->key_len);
+    int conflict_keys =
+        map_count_keys_matching_str(map, rule->val, rule->val_len);
 
     if (match_keys == 0) {
         flb_info
@@ -541,7 +563,7 @@ static inline int apply_rule_HARD_RENAME(msgpack_packer * packer,
         msgpack_pack_map(packer, map->via.map.size);
         for (i = 0; i < map->via.map.size; i++) {
             kv = &map->via.map.ptr[i];
-            if (kv_key_matches_str(kv, rule->key, rule->key_len)) {
+            if (kv_key_matches_rule_key(kv, rule)) {
                 helper_pack_string(packer, rule->val, rule->val_len);
             }
             else {
@@ -557,8 +579,8 @@ static inline int apply_rule_HARD_RENAME(msgpack_packer * packer,
         for (i = 0; i < map->via.map.size; i++) {
             kv = &map->via.map.ptr[i];
             // If this kv->key matches rule->val it's a conflict source key and will be skipped
-            if (!kv_key_matches_str(kv, rule->val, rule->val_len)) {
-                if (kv_key_matches_str(kv, rule->key, rule->key_len)) {
+            if (!kv_key_matches_rule_val(kv, rule)) {
+                if (kv_key_matches_rule_key(kv, rule)) {
                     helper_pack_string(packer, rule->val, rule->val_len);
                 }
                 else {
@@ -576,8 +598,10 @@ static inline int apply_rule_COPY(msgpack_packer * packer,
                                   msgpack_object * map,
                                   struct modify_rule *rule)
 {
-    int match_keys = map_count_keys_matching_rule_key(map, rule);
-    int conflict_keys = map_count_keys_matching_rule_val(map, rule);
+    int match_keys =
+        map_count_keys_matching_str(map, rule->key, rule->key_len);
+    int conflict_keys =
+        map_count_keys_matching_str(map, rule->val, rule->val_len);
     int i;
     msgpack_object_kv *kv;
 
@@ -622,8 +646,10 @@ static inline int apply_rule_HARD_COPY(msgpack_packer * packer,
 {
     int i;
 
-    int match_keys = map_count_keys_matching_rule_key(map, rule);
-    int conflict_keys = map_count_keys_matching_rule_val(map, rule);
+    int match_keys =
+        map_count_keys_matching_str(map, rule->key, rule->key_len);
+    int conflict_keys =
+        map_count_keys_matching_str(map, rule->val, rule->val_len);
     msgpack_object_kv *kv;
 
     if (match_keys < 1) {
@@ -686,7 +712,7 @@ static inline int apply_rule_ADD(msgpack_packer * packer,
                                  msgpack_object * map,
                                  struct modify_rule *rule)
 {
-    if (map_count_keys_matching_rule_key(map, rule) == 0) {
+    if (map_count_keys_matching_str(map, rule->key, rule->key_len) == 0) {
         msgpack_pack_map(packer, map->via.map.size + 1);
         map_pack_each(packer, map);
         helper_pack_string(packer, rule->key, rule->key_len);
@@ -705,7 +731,7 @@ static inline int apply_rule_SET(msgpack_packer * packer,
                                  msgpack_object * map,
                                  struct modify_rule *rule)
 {
-    int matches = map_count_keys_matching_rule_key(map, rule);
+    int matches = map_count_keys_matching_str(map, rule->key, rule->key_len);
 
     msgpack_pack_map(packer, map->via.map.size - matches + 1);
 
@@ -727,7 +753,7 @@ static inline int apply_rule_REMOVE(msgpack_packer * packer,
                                     msgpack_object * map,
                                     struct modify_rule *rule)
 {
-    int matches = map_count_keys_matching_rule_key(map, rule);
+    int matches = map_count_keys_matching_str(map, rule->key, rule->key_len);
 
     if (matches == 0) {
         return FLB_FILTER_NOTOUCH;

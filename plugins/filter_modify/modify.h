@@ -64,6 +64,8 @@ struct modify_rule
   int val_len;
   char *key;
   char *val;
+  char *raw_k;
+  char *raw_v;
   struct mk_list _head;
 };
 
@@ -74,6 +76,8 @@ struct modify_condition
   int b_len;
   char *a;
   char *b;
+  char *raw_k;
+  char *raw_v;
   struct mk_list _head;
 };
 #endif
