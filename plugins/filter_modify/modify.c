@@ -117,10 +117,16 @@ static int setup(struct filter_modify_ctx *ctx,
             //
 
             condition = flb_malloc(sizeof(struct modify_condition));
-            if (!rule) {
-                flb_errno();
+            if (!condition) {
+                flb_error("[filter_modify] Unable to allocate memory for condition");
+                teardown(ctx);
+                flb_free(condition);
+                flb_utils_split_free(split);
                 return -1;
             }
+
+            condition->raw_k = flb_strndup(prop->key, strlen(prop->key));
+            condition->raw_v = flb_strndup(prop->val, strlen(prop->val));
 
             sentry =
                 mk_list_entry_first(split, struct flb_split_entry, _head);
@@ -173,9 +179,15 @@ static int setup(struct filter_modify_ctx *ctx,
 
             rule = flb_malloc(sizeof(struct modify_rule));
             if (!rule) {
-                flb_errno();
+                flb_error("[filter_modify] Unable to allocate memory for rule");
+                teardown(ctx);
+                flb_free(condition);
+                flb_utils_split_free(split);
                 return -1;
             }
+
+            rule->raw_k = flb_strndup(prop->key, strlen(prop->key));
+            rule->raw_v = flb_strndup(prop->val, strlen(prop->val));
 
             sentry =
                 mk_list_entry_first(split, struct flb_split_entry, _head);
@@ -445,8 +457,8 @@ static inline bool evaluate_condition(msgpack_object * map,
         return evaluate_condition_KEY_DOES_NOT_EXIST(map, condition);
     default:
         flb_warn
-            ("[filter_modify] Unknown conditiontype for condition with key %s, assuming result FAILED TO MEET CONDITION",
-             condition->a);
+            ("[filter_modify] Unknown conditiontype for condition %s, assuming result FAILED TO MEET CONDITION",
+             condition->raw_v);
     }
     return false;
 }
@@ -463,7 +475,7 @@ static inline bool evaluate_conditions(msgpack_object * map,
     mk_list_foreach_safe(head, tmp, &ctx->conditions) {
         condition = mk_list_entry(head, struct modify_condition, _head);
         if (!evaluate_condition(map, condition)) {
-            flb_debug("[filter_modify] : Condition not met");
+            flb_debug("[filter_modify] : Condition not met : %s", condition->raw_v);
             ok = false;
         }
     }
