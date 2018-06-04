@@ -122,7 +122,8 @@ static int setup(struct filter_modify_ctx *ctx,
                 return -1;
             }
 
-            sentry = mk_list_entry_first(split, struct flb_split_entry, _head);
+            sentry =
+                mk_list_entry_first(split, struct flb_split_entry, _head);
             if (strcasecmp(sentry->value, "key_exists") == 0) {
                 condition->conditiontype = KEY_EXISTS;
             }
@@ -130,20 +131,23 @@ static int setup(struct filter_modify_ctx *ctx,
                 condition->conditiontype = KEY_DOES_NOT_EXIST;
             }
             else {
-                flb_error("[filter_modify] Invalid config for %s : %s", prop->key, prop->val);
+                flb_error("[filter_modify] Invalid config for %s : %s",
+                          prop->key, prop->val);
                 teardown(ctx);
                 flb_free(condition);
                 flb_utils_split_free(split);
                 return -1;
             }
 
-            sentry = mk_list_entry_next(&sentry->_head, struct flb_split_entry, _head, split);
+            sentry =
+                mk_list_entry_next(&sentry->_head, struct flb_split_entry,
+                                   _head, split);
             condition->a = flb_strndup(sentry->value, sentry->len);
             condition->a_len = sentry->len;
 
-            flb_error("[filter_modify] Config for %s : %s", prop->key, condition->a);
             if (list_size == 3) {
-                sentry = mk_list_entry_last(split, struct flb_split_entry, _head);
+                sentry =
+                    mk_list_entry_last(split, struct flb_split_entry, _head);
                 condition->b = flb_strndup(sentry->value, sentry->len);
                 condition->b_len = sentry->len;
             }
@@ -166,14 +170,15 @@ static int setup(struct filter_modify_ctx *ctx,
             //
             // Build a rule
             //
- 
+
             rule = flb_malloc(sizeof(struct modify_rule));
             if (!rule) {
                 flb_errno();
                 return -1;
             }
 
-            sentry = mk_list_entry_first(split, struct flb_split_entry, _head);
+            sentry =
+                mk_list_entry_first(split, struct flb_split_entry, _head);
             rule->key = flb_strndup(sentry->value, sentry->len);
             rule->key_len = sentry->len;
 
@@ -430,8 +435,8 @@ static inline bool evaluate_condition_KEY_DOES_NOT_EXIST(msgpack_object * map,
     return !evaluate_condition_KEY_EXISTS(map, condition);
 }
 
-static inline bool evaluate_condition(msgpack_object * map, 
-                                         struct modify_condition *condition)
+static inline bool evaluate_condition(msgpack_object * map,
+                                      struct modify_condition *condition)
 {
     switch (condition->conditiontype) {
     case KEY_EXISTS:
@@ -446,8 +451,8 @@ static inline bool evaluate_condition(msgpack_object * map,
     return false;
 }
 
-static inline bool evaluate_conditions(msgpack_object * map, 
-                                         struct filter_modify_ctx *ctx)
+static inline bool evaluate_conditions(msgpack_object * map,
+                                       struct filter_modify_ctx *ctx)
 {
     bool ok = true;
 
@@ -508,8 +513,10 @@ static inline int apply_rule_HARD_RENAME(msgpack_packer * packer,
 {
     int i;
 
-    int match_keys = map_count_keys_matching_str(map, rule->key, rule->key_len);
-    int conflict_keys = map_count_keys_matching_str(map, rule->val, rule->val_len);
+    int match_keys =
+        map_count_keys_matching_str(map, rule->key, rule->key_len);
+    int conflict_keys =
+        map_count_keys_matching_str(map, rule->val, rule->val_len);
     msgpack_object_kv *kv;
 
     if (match_keys == 0) {
@@ -754,14 +761,15 @@ static inline int apply_modifying_rule(msgpack_packer * packer,
 }
 
 static inline int apply_modifying_rules(msgpack_packer * packer,
-                                         msgpack_object * root,
-                                         struct filter_modify_ctx *ctx)
+                                        msgpack_object * root,
+                                        struct filter_modify_ctx *ctx)
 {
     msgpack_object ts = root->via.array.ptr[0];
     msgpack_object map = root->via.array.ptr[1];
 
     if (!evaluate_conditions(&map, ctx)) {
-        flb_debug("[filter_modify] : Conditions not met, not touching record");
+        flb_debug
+            ("[filter_modify] : Conditions not met, not touching record");
         return FLB_FILTER_NOTOUCH;
     }
 
@@ -882,7 +890,8 @@ static int cb_modify_filter(void *data, size_t bytes,
     msgpack_unpacked_init(&result);
     while (msgpack_unpack_next(&result, data, bytes, &off)) {
         if (result.data.type == MSGPACK_OBJECT_ARRAY) {
-            modifications += apply_modifying_rules(&packer, &result.data, ctx);
+            modifications +=
+                apply_modifying_rules(&packer, &result.data, ctx);
         }
         else {
             msgpack_pack_object(&packer, result.data);
