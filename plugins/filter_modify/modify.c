@@ -35,7 +35,17 @@ static void teardown(struct filter_modify_ctx *ctx)
 {
     struct mk_list *tmp;
     struct mk_list *head;
+
     struct modify_rule *rule;
+    struct modify_condition *condition;
+
+    mk_list_foreach_safe(head, tmp, &ctx->conditions) {
+        condition = mk_list_entry(head, struct modify_condition, _head);
+        flb_free(condition->a);
+        flb_free(condition->b);
+        mk_list_del(&condition->_head);
+        flb_free(condition);
+    }
 
     mk_list_foreach_safe(head, tmp, &ctx->rules) {
         rule = mk_list_entry(head, struct modify_rule, _head);
@@ -44,6 +54,7 @@ static void teardown(struct filter_modify_ctx *ctx)
         mk_list_del(&rule->_head);
         flb_free(rule);
     }
+
 }
 
 static void helper_pack_string(msgpack_packer * packer, const char *str,
@@ -73,6 +84,15 @@ static int setup(struct filter_modify_ctx *ctx,
     struct flb_split_entry *sentry;
     struct flb_config_prop *prop;
     struct modify_rule *rule;
+
+    // Split list
+    // - Arg 1 is condition?
+    // --> Setup Condition
+    //   - Malloc Condition
+    //   - Switch list size
+    // --> Setup Rule
+    //   - Malloc Rule
+    //   - Switch list size
 
     mk_list_foreach(head, &f_ins->properties) {
         prop = mk_list_entry(head, struct flb_config_prop, _head);
@@ -314,6 +334,58 @@ static inline int map_count_fn(msgpack_object * map,
     return count;
 }
 
+static inline bool evaluate_condition_KEY_EXISTS(msgpack_object * map,
+                                                 struct modify_condition
+                                                 *condition)
+{
+    return (map_count_keys_matching_str(map, condition->a, condition->a_len) >
+            0);
+}
+
+static inline bool evaluate_condition_KEY_DOES_NOT_EXIST(msgpack_object * map,
+                                                         struct
+                                                         modify_condition
+                                                         *condition)
+{
+    return !evaluate_condition_KEY_EXISTS(map, condition);
+}
+
+static inline bool evaluate_condition(msgpack_object * map, 
+                                         struct modify_condition *condition)
+{
+    switch (condition->conditiontype) {
+    case KEY_EXISTS:
+        return evaluate_condition_KEY_EXISTS(map, condition);
+    case KEY_DOES_NOT_EXIST:
+        return evaluate_condition_KEY_EXISTS(map, condition);
+    default:
+        flb_warn
+            ("[filter_modify] Unknown conditiontype for condition with key %s, assuming result FAILED TO MEET CONDITION",
+             condition->a);
+    }
+    return false;
+}
+
+static inline bool evaluate_conditions(msgpack_object * map, 
+                                         struct filter_modify_ctx *ctx)
+{
+    bool ok = true;
+
+    struct mk_list *tmp;
+    struct mk_list *head;
+    struct modify_condition *condition;
+
+    mk_list_foreach_safe(head, tmp, &ctx->conditions) {
+        condition = mk_list_entry(head, struct modify_condition, _head);
+        if (!evaluate_condition(map, condition)) {
+            flb_debug("[filter_modify] : Condition not met");
+            ok = false;
+        }
+    }
+
+    return ok;
+}
+
 static inline int apply_rule_RENAME(msgpack_packer * packer,
                                     msgpack_object * map,
                                     struct modify_rule *rule)
@@ -356,8 +428,8 @@ static inline int apply_rule_HARD_RENAME(msgpack_packer * packer,
 {
     int i;
 
-    int match_keys = map_count_keys_matching_rule_key(map, rule);
-    int conflict_keys = map_count_keys_matching_rule_val(map, rule);
+    int match_keys = map_count_keys_matching_str(map, rule->key, rule->key_len);
+    int conflict_keys = map_count_keys_matching_str(map, rule->val, rule->val_len);
     msgpack_object_kv *kv;
 
     if (match_keys == 0) {
@@ -370,7 +442,7 @@ static inline int apply_rule_HARD_RENAME(msgpack_packer * packer,
         msgpack_pack_map(packer, map->via.map.size);
         for (i = 0; i < map->via.map.size; i++) {
             kv = &map->via.map.ptr[i];
-            if (kv_key_matches_rule_key(kv, rule)) {
+            if (kv_key_matches_str(kv, rule->key, rule->key_len)) {
                 helper_pack_string(packer, rule->val, rule->val_len);
             }
             else {
@@ -386,8 +458,8 @@ static inline int apply_rule_HARD_RENAME(msgpack_packer * packer,
         for (i = 0; i < map->via.map.size; i++) {
             kv = &map->via.map.ptr[i];
             // If this kv->key matches rule->val it's a conflict source key and will be skipped
-            if (!kv_key_matches_rule_val(kv, rule)) {
-                if (kv_key_matches_rule_key(kv, rule)) {
+            if (!kv_key_matches_str(kv, rule->val, rule->val_len)) {
+                if (kv_key_matches_str(kv, rule->key, rule->key_len)) {
                     helper_pack_string(packer, rule->val, rule->val_len);
                 }
                 else {
@@ -601,12 +673,19 @@ static inline int apply_modifying_rule(msgpack_packer * packer,
     return FLB_FILTER_NOTOUCH;
 }
 
-static inline void apply_modifying_rules(msgpack_packer * packer,
+static inline int apply_modifying_rules(msgpack_packer * packer,
                                          msgpack_object * root,
                                          struct filter_modify_ctx *ctx)
 {
     msgpack_object ts = root->via.array.ptr[0];
     msgpack_object map = root->via.array.ptr[1];
+
+    if (!evaluate_conditions(&map, ctx)) {
+        flb_debug("[filter_modify] : Conditions not met, not touching record");
+        return FLB_FILTER_NOTOUCH;
+    }
+
+    bool has_modifications = false;
 
     int records_in = map.via.map.size;
 
@@ -630,6 +709,8 @@ static inline void apply_modifying_rules(msgpack_packer * packer,
         msgpack_sbuffer_clear(&buffer);
         if (apply_modifying_rule(&loop_packer, &map, rule) !=
             FLB_FILTER_NOTOUCH) {
+
+            has_modifications = true;
 
             msgpack_unpack(buffer.data, buffer.size, NULL, &mempool,
                            &deserialized);
@@ -661,22 +742,7 @@ static inline void apply_modifying_rules(msgpack_packer * packer,
     msgpack_sbuffer_destroy(&buffer);
     msgpack_zone_destroy(&mempool);
 
-}
-
-static inline bool evaluate_condition_KEY_EXISTS(msgpack_object * map,
-                                                 struct modify_condition
-                                                 *condition)
-{
-    return (map_count_keys_matching_str(map, condition->a, condition->a_len) >
-            0);
-}
-
-static inline bool evaluate_condition_KEY_DOES_NOT_EXIST(msgpack_object * map,
-                                                         struct
-                                                         modify_condition
-                                                         *condition)
-{
-    return !evaluate_condition_KEY_EXISTS(map, condition);
+    return has_modifications ? 1 : 0;
 }
 
 static int cb_modify_init(struct flb_filter_instance *f_ins,
@@ -691,6 +757,7 @@ static int cb_modify_init(struct flb_filter_instance *f_ins,
         return -1;
     }
 
+    mk_list_init(&ctx->conditions);
     mk_list_init(&ctx->rules);
 
     if (setup(ctx, f_ins, config) < 0) {
@@ -716,6 +783,8 @@ static int cb_modify_filter(void *data, size_t bytes,
 
     struct filter_modify_ctx *ctx = context;
 
+    int modifications = 0;
+
     msgpack_sbuffer buffer;
     msgpack_sbuffer_init(&buffer);
 
@@ -733,7 +802,7 @@ static int cb_modify_filter(void *data, size_t bytes,
     msgpack_unpacked_init(&result);
     while (msgpack_unpack_next(&result, data, bytes, &off)) {
         if (result.data.type == MSGPACK_OBJECT_ARRAY) {
-            apply_modifying_rules(&packer, &result.data, ctx);
+            modifications += apply_modifying_rules(&packer, &result.data, ctx);
         }
         else {
             msgpack_pack_object(&packer, result.data);
@@ -744,7 +813,7 @@ static int cb_modify_filter(void *data, size_t bytes,
     *out_buf = buffer.data;
     *out_size = buffer.size;
 
-    return FLB_FILTER_MODIFIED;
+    return (modifications == 0) ? FLB_FILTER_NOTOUCH : FLB_FILTER_MODIFIED;
 }
 
 static int cb_modify_exit(void *data, struct flb_config *config)

@@ -20,7 +20,6 @@
 #ifndef FLB_FILTER_MODIFY_H
 #define FLB_FILTER_MODIFY_H
 
-
 /*
    - set KEY VALUE : Add a key/value pair, overwrite it if the key already exists
    - add KEY VALUE : Add a key/value pair, only if the key doesn't exist
@@ -54,6 +53,8 @@ struct filter_modify_ctx
 {
   int rules_cnt;
   struct mk_list rules;
+  int conditions_cnt;
+  struct mk_list conditions;
 };
 
 struct modify_rule
