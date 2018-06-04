@@ -97,14 +97,13 @@ static int setup(struct filter_modify_ctx *ctx,
     //   - Malloc Rule
     //   - Switch list size
 
-
     mk_list_foreach(head, &f_ins->properties) {
         prop = mk_list_entry(head, struct flb_config_prop, _head);
 
         split = flb_utils_split(prop->val, ' ', 1);
         list_size = mk_list_size(split);
 
-        if (list_size == 0 || list_size > 3) {
+        if (list_size == 1 || list_size > 3) {
             flb_error("[filter_modify] Invalid config for %s", prop->key);
             teardown(ctx);
             flb_free(rule);
@@ -123,15 +122,35 @@ static int setup(struct filter_modify_ctx *ctx,
                 return -1;
             }
 
-            condition->conditiontype = KEY_EXISTS;
-
             sentry = mk_list_entry_first(split, struct flb_split_entry, _head);
+            if (strcasecmp(sentry->value, "key_exists") == 0) {
+                condition->conditiontype = KEY_EXISTS;
+            }
+            else if (strcasecmp(sentry->value, "key_does_not_exist") == 0) {
+                condition->conditiontype = KEY_DOES_NOT_EXIST;
+            }
+            else {
+                flb_error("[filter_modify] Invalid config for %s : %s", prop->key, prop->val);
+                teardown(ctx);
+                flb_free(condition);
+                flb_utils_split_free(split);
+                return -1;
+            }
+
+            sentry = mk_list_entry_next(&sentry->_head, struct flb_split_entry, _head, split);
             condition->a = flb_strndup(sentry->value, sentry->len);
             condition->a_len = sentry->len;
 
-            sentry = mk_list_entry_last(split, struct flb_split_entry, _head);
-            condition->b = flb_strndup(sentry->value, sentry->len);
-            condition->b_len = sentry->len;
+            flb_error("[filter_modify] Config for %s : %s", prop->key, condition->a);
+            if (list_size == 3) {
+                sentry = mk_list_entry_last(split, struct flb_split_entry, _head);
+                condition->b = flb_strndup(sentry->value, sentry->len);
+                condition->b_len = sentry->len;
+            }
+            else {
+                condition->b = NULL;
+                condition->b_len = 0;
+            }
 
             flb_utils_split_free(split);
 
@@ -418,7 +437,7 @@ static inline bool evaluate_condition(msgpack_object * map,
     case KEY_EXISTS:
         return evaluate_condition_KEY_EXISTS(map, condition);
     case KEY_DOES_NOT_EXIST:
-        return evaluate_condition_KEY_EXISTS(map, condition);
+        return evaluate_condition_KEY_DOES_NOT_EXIST(map, condition);
     default:
         flb_warn
             ("[filter_modify] Unknown conditiontype for condition with key %s, assuming result FAILED TO MEET CONDITION",
