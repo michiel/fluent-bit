@@ -84,6 +84,9 @@ static int setup(struct filter_modify_ctx *ctx,
     struct flb_split_entry *sentry;
     struct flb_config_prop *prop;
     struct modify_rule *rule;
+    struct modify_condition *condition;
+
+    int list_size;
 
     // Split list
     // - Arg 1 is condition?
@@ -94,77 +97,135 @@ static int setup(struct filter_modify_ctx *ctx,
     //   - Malloc Rule
     //   - Switch list size
 
+
     mk_list_foreach(head, &f_ins->properties) {
         prop = mk_list_entry(head, struct flb_config_prop, _head);
 
-        rule = flb_malloc(sizeof(struct modify_rule));
-        if (!rule) {
-            flb_errno();
-            return -1;
-        }
-
         split = flb_utils_split(prop->val, ' ', 1);
-        if (mk_list_size(split) != 2) {
-            flb_error
-                ("[filter_modify] Invalid value for operation %s, expected key and value",
-                 prop->val);
+        list_size = mk_list_size(split);
+
+        if (list_size == 0 || list_size > 3) {
+            flb_error("[filter_modify] Invalid config for %s", prop->key);
             teardown(ctx);
             flb_free(rule);
             flb_utils_split_free(split);
             return -1;
         }
+        else if (strcasecmp(prop->key, "condition") == 0) {
 
-        sentry = mk_list_entry_first(split, struct flb_split_entry, _head);
-        rule->key = flb_strndup(sentry->value, sentry->len);
-        rule->key_len = sentry->len;
+            //
+            // Build a condition
+            //
 
-        sentry = mk_list_entry_last(split, struct flb_split_entry, _head);
-        rule->val = flb_strndup(sentry->value, sentry->len);
-        rule->val_len = sentry->len;
+            condition = flb_malloc(sizeof(struct modify_condition));
+            if (!rule) {
+                flb_errno();
+                return -1;
+            }
 
-        flb_utils_split_free(split);
+            condition->conditiontype = KEY_EXISTS;
 
-        if (strcasecmp(prop->key, "rename") == 0) {
-            rule->ruletype = RENAME;
-        }
-        else if (strcasecmp(prop->key, "hard_rename") == 0) {
-            rule->ruletype = HARD_RENAME;
-        }
-        else if (strcasecmp(prop->key, "rewrite") == 0) {
-            rule->ruletype = REWRITE;
-        }
-        else if (strcasecmp(prop->key, "hard_rewrite") == 0) {
-            rule->ruletype = HARD_REWRITE;
-        }
-        else if (strcasecmp(prop->key, "add") == 0) {
-            rule->ruletype = ADD;
-        }
-        else if (strcasecmp(prop->key, "set") == 0) {
-            rule->ruletype = SET;
-        }
-        else if (strcasecmp(prop->key, "remove") == 0) {
-            rule->ruletype = REMOVE;
-        }
-        else if (strcasecmp(prop->key, "remove_regex") == 0) {
-            rule->ruletype = REMOVE_REGEX;
-        }
-        else if (strcasecmp(prop->key, "copy") == 0) {
-            rule->ruletype = COPY;
-        }
-        else if (strcasecmp(prop->key, "hard_copy") == 0) {
-            rule->ruletype = HARD_COPY;
+            sentry = mk_list_entry_first(split, struct flb_split_entry, _head);
+            condition->a = flb_strndup(sentry->value, sentry->len);
+            condition->a_len = sentry->len;
+
+            sentry = mk_list_entry_last(split, struct flb_split_entry, _head);
+            condition->b = flb_strndup(sentry->value, sentry->len);
+            condition->b_len = sentry->len;
+
+            flb_utils_split_free(split);
+
+            //
+            // Configure condition
+            //
+
+            mk_list_add(&condition->_head, &ctx->conditions);
+            ctx->conditions_cnt++;
         }
         else {
-            flb_error
-                ("[filter_modify] Invalid operation '%s' in configuration",
-                 prop->key);
-            teardown(ctx);
-            flb_free(rule);
-            return -1;
+
+            //
+            // Build a rule
+            //
+ 
+            rule = flb_malloc(sizeof(struct modify_rule));
+            if (!rule) {
+                flb_errno();
+                return -1;
+            }
+
+            sentry = mk_list_entry_first(split, struct flb_split_entry, _head);
+            rule->key = flb_strndup(sentry->value, sentry->len);
+            rule->key_len = sentry->len;
+
+            sentry = mk_list_entry_last(split, struct flb_split_entry, _head);
+            rule->val = flb_strndup(sentry->value, sentry->len);
+            rule->val_len = sentry->len;
+
+            flb_utils_split_free(split);
+
+            //
+            // Configure rule
+            //
+
+            if (list_size == 1) {
+                if (strcasecmp(prop->key, "remove") == 0) {
+                    rule->ruletype = REMOVE;
+                }
+                else {
+                    flb_error
+                        ("[filter_modify] Invalid operation '%s' in configuration",
+                         prop->val);
+                    teardown(ctx);
+                    flb_free(rule);
+                    return -1;
+                }
+            }
+            else if (list_size == 2) {
+                if (strcasecmp(prop->key, "rename") == 0) {
+                    rule->ruletype = RENAME;
+                }
+                else if (strcasecmp(prop->key, "hard_rename") == 0) {
+                    rule->ruletype = HARD_RENAME;
+                }
+                else if (strcasecmp(prop->key, "rewrite") == 0) {
+                    rule->ruletype = REWRITE;
+                }
+                else if (strcasecmp(prop->key, "hard_rewrite") == 0) {
+                    rule->ruletype = HARD_REWRITE;
+                }
+                else if (strcasecmp(prop->key, "add") == 0) {
+                    rule->ruletype = ADD;
+                }
+                else if (strcasecmp(prop->key, "set") == 0) {
+                    rule->ruletype = SET;
+                }
+                else if (strcasecmp(prop->key, "remove") == 0) {
+                    rule->ruletype = REMOVE;
+                }
+                else if (strcasecmp(prop->key, "remove_regex") == 0) {
+                    rule->ruletype = REMOVE_REGEX;
+                }
+                else if (strcasecmp(prop->key, "copy") == 0) {
+                    rule->ruletype = COPY;
+                }
+                else if (strcasecmp(prop->key, "hard_copy") == 0) {
+                    rule->ruletype = HARD_COPY;
+                }
+                else {
+                    flb_error
+                        ("[filter_modify] Invalid operation '%s' in configuration",
+                         prop->val);
+                    teardown(ctx);
+                    flb_free(rule);
+                    return -1;
+                }
+            }
+
+            mk_list_add(&rule->_head, &ctx->rules);
+            ctx->rules_cnt++;
         }
 
-        mk_list_add(&rule->_head, &ctx->rules);
-        ctx->rules_cnt++;
     }
 
     return 0;
