@@ -859,25 +859,29 @@ static inline int apply_modifying_rules(msgpack_packer * packer,
         }
     }
 
-    // * Record array init(2)
-    msgpack_pack_array(packer, 2);
+    if (has_modifications) {
+        // * Record array init(2)
+        msgpack_pack_array(packer, 2);
 
-    // * * Record array item 1/2
-    msgpack_pack_object(packer, ts);
+        // * * Record array item 1/2
+        msgpack_pack_object(packer, ts);
 
-    flb_debug
-        ("[filter_modify] Input map size %d elements, output map size %d elements",
-         records_in, map.via.map.size);
+        flb_debug
+            ("[filter_modify] Input map size %d elements, output map size %d elements",
+             records_in, map.via.map.size);
 
-    // * * Record array item 2/2
-    msgpack_pack_map(packer, map.via.map.size);
-    map_pack_each(packer, &map);
+        // * * Record array item 2/2
+        msgpack_pack_map(packer, map.via.map.size);
+        map_pack_each(packer, &map);
+
+    }
 
     msgpack_unpacked_destroy(&unpacked);
     msgpack_unpacker_destroy(&unpacker);
     msgpack_sbuffer_destroy(&sbuffer);
 
     return has_modifications ? 1 : 0;
+
 }
 
 static int cb_modify_init(struct flb_filter_instance *f_ins,
