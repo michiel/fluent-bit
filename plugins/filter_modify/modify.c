@@ -65,11 +65,6 @@ static void helper_pack_string(msgpack_packer * packer, const char *str,
         flb_error("[filter_modify] helper_pack_string : NULL passed");
         msgpack_pack_nil(packer);
     }
-    else if (len != strlen(str)) {
-        flb_error
-            ("[filter_modify] helper_pack_string : Incorrect LEN passed");
-        msgpack_pack_nil(packer);
-    }
     else {
         msgpack_pack_str(packer, len);
         msgpack_pack_str_body(packer, str, len);
@@ -102,6 +97,9 @@ static int setup(struct filter_modify_ctx *ctx,
 
         split = flb_utils_split(prop->val, ' ', 1);
         list_size = mk_list_size(split);
+
+        // Conditions are,
+        // CONDITION CONDITIONTYPE VAL_A VAL_B
 
         if (list_size == 1 || list_size > 3) {
             flb_error("[filter_modify] Invalid config for %s", prop->key);
