@@ -43,6 +43,8 @@ static void teardown(struct filter_modify_ctx *ctx)
         condition = mk_list_entry(head, struct modify_condition, _head);
         flb_free(condition->a);
         flb_free(condition->b);
+        flb_free(condition->raw_k);
+        flb_free(condition->raw_v);
         mk_list_del(&condition->_head);
         flb_free(condition);
     }
@@ -51,10 +53,11 @@ static void teardown(struct filter_modify_ctx *ctx)
         rule = mk_list_entry(head, struct modify_rule, _head);
         flb_free(rule->key);
         flb_free(rule->val);
+        flb_free(rule->raw_k);
+        flb_free(rule->raw_v);
         mk_list_del(&rule->_head);
         flb_free(rule);
     }
-
 }
 
 static void helper_pack_string(msgpack_packer * packer, const char *str,
@@ -815,32 +818,39 @@ static inline int apply_modifying_rules(msgpack_packer * packer,
 
     struct modify_rule *rule;
 
-    msgpack_sbuffer buffer;
-    msgpack_packer loop_packer;
-    msgpack_zone mempool;
-    msgpack_object deserialized;
+    msgpack_sbuffer sbuffer;
+    msgpack_packer in_packer;
+    msgpack_unpacker unpacker;
+    msgpack_unpacked unpacked;
 
     struct mk_list *tmp;
     struct mk_list *head;
 
-    msgpack_sbuffer_init(&buffer);
-    msgpack_zone_init(&mempool, 8192);
-    msgpack_packer_init(&loop_packer, &buffer, msgpack_sbuffer_write);
+
+    msgpack_sbuffer_init(&sbuffer);
+    msgpack_packer_init(&in_packer, &sbuffer, msgpack_sbuffer_write);
+    msgpack_unpacked_init(&unpacked);
+    if (!msgpack_unpacker_init(&unpacker, 1024 * 8)) {
+        flb_error("NOPE");
+        return -1;
+    }
 
     mk_list_foreach_safe(head, tmp, &ctx->rules) {
         rule = mk_list_entry(head, struct modify_rule, _head);
 
-        msgpack_sbuffer_clear(&buffer);
-        if (apply_modifying_rule(&loop_packer, &map, rule) !=
-            FLB_FILTER_NOTOUCH) {
+        msgpack_sbuffer_clear(&sbuffer);
 
+        if (apply_modifying_rule(&in_packer, &map, rule) !=
+            FLB_FILTER_NOTOUCH) {
             has_modifications = true;
 
-            msgpack_unpack(buffer.data, buffer.size, NULL, &mempool,
-                           &deserialized);
+            memcpy(msgpack_unpacker_buffer(&unpacker), sbuffer.data, sbuffer.size);
+            msgpack_unpacker_buffer_consumed(&unpacker, sbuffer.size);
 
-            if (deserialized.type == MSGPACK_OBJECT_MAP) {
-                map = deserialized;;
+            msgpack_unpacker_next(&unpacker, &unpacked);
+
+            if (unpacked.data.type == MSGPACK_OBJECT_MAP) {
+                map = unpacked.data;
             }
             else {
                 flb_error
@@ -863,8 +873,9 @@ static inline int apply_modifying_rules(msgpack_packer * packer,
     msgpack_pack_map(packer, map.via.map.size);
     map_pack_each(packer, &map);
 
-    msgpack_sbuffer_destroy(&buffer);
-    msgpack_zone_destroy(&mempool);
+    msgpack_unpacked_destroy(&unpacked);
+    msgpack_unpacker_destroy(&unpacker);
+    msgpack_sbuffer_destroy(&sbuffer);
 
     return has_modifications ? 1 : 0;
 }
