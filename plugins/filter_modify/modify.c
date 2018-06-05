@@ -142,7 +142,8 @@ static int setup(struct filter_modify_ctx *ctx,
             else if (strcasecmp(sentry->value, "key_value_equals") == 0) {
                 condition->conditiontype = KEY_VALUE_EQUALS;
             }
-            else if (strcasecmp(sentry->value, "key_value_does_not_equal") == 0) {
+            else if (strcasecmp(sentry->value, "key_value_does_not_equal") ==
+                     0) {
                 condition->conditiontype = KEY_VALUE_DOES_NOT_EQUAL;
             }
             else {
@@ -234,13 +235,12 @@ static int setup(struct filter_modify_ctx *ctx,
                 else if (strcasecmp(prop->key, "hard_rename") == 0) {
                     rule->ruletype = HARD_RENAME;
                 }
-                else if (strcasecmp(prop->key, "rewrite") == 0) {
-                    rule->ruletype = REWRITE;
-                }
-                else if (strcasecmp(prop->key, "hard_rewrite") == 0) {
-                    rule->ruletype = HARD_REWRITE;
-                }
                 else if (strcasecmp(prop->key, "add") == 0) {
+                    rule->ruletype = ADD;
+                }
+                else if (strcasecmp(prop->key, "add_if_not_present") == 0) {
+                    flb_info
+                        ("[filter_modify] DEPRECATED USE : Operation 'add_if_not_present' has been replaced by 'add'.");
                     rule->ruletype = ADD;
                 }
                 else if (strcasecmp(prop->key, "set") == 0) {
@@ -248,9 +248,6 @@ static int setup(struct filter_modify_ctx *ctx,
                 }
                 else if (strcasecmp(prop->key, "remove") == 0) {
                     rule->ruletype = REMOVE;
-                }
-                else if (strcasecmp(prop->key, "remove_regex") == 0) {
-                    rule->ruletype = REMOVE_REGEX;
                 }
                 else if (strcasecmp(prop->key, "copy") == 0) {
                     rule->ruletype = COPY;
@@ -442,12 +439,13 @@ static inline bool evaluate_condition_KEY_VALUE_EQUALS(msgpack_object * map,
 
     for (i = 0; i < map->via.map.size; i++) {
         kv = &map->via.map.ptr[i];
-        flb_error("Matching key to %s", condition->a);
         if (kv_key_matches_str(kv, condition->a, condition->a_len)) {
-            flb_error("\tMatching val to %s", condition->b);
             if (kv_val_matches_str(kv, condition->b, condition->b_len)) {
-                flb_error("\t\t - We have a match");
+                flb_debug
+                    ("[filter_modify] : Match for condition KEY_VALUE_EQUALS %s",
+                     condition->b);
                 match = true;
+                break;
             }
         }
     }
@@ -477,8 +475,8 @@ static inline bool evaluate_condition(msgpack_object * map,
         return evaluate_condition_KEY_VALUE_DOES_NOT_EQUAL(map, condition);
     default:
         flb_warn
-            ("[filter_modify] Unknown conditiontype for condition %s, assuming result FAILED TO MEET CONDITION",
-             condition->raw_v);
+            ("[filter_modify] Unknown conditiontype for condition %s : %s, assuming result FAILED TO MEET CONDITION",
+             condition->raw_k, condition->raw_v);
     }
     return false;
 }
@@ -775,18 +773,12 @@ static inline int apply_modifying_rule(msgpack_packer * packer,
         return apply_rule_RENAME(packer, map, rule);
     case HARD_RENAME:
         return apply_rule_HARD_RENAME(packer, map, rule);
-//     case REWRITE:
-//         return apply_rule_REWRITE(packer, map, rule);
-//     case HARD_REWRITE:
-//         return apply_rule_HARD_REWRITE(packer, map, rule);
     case ADD:
         return apply_rule_ADD(packer, map, rule);
     case SET:
         return apply_rule_SET(packer, map, rule);
     case REMOVE:
         return apply_rule_REMOVE(packer, map, rule);
-//     case REMOVE_REGEX:
-//         return apply_rule_REMOVE_REGEX(packer, map, rule);
     case COPY:
         return apply_rule_COPY(packer, map, rule);
     case HARD_COPY:
@@ -809,7 +801,7 @@ static inline int apply_modifying_rules(msgpack_packer * packer,
     if (!evaluate_conditions(&map, ctx)) {
         flb_debug
             ("[filter_modify] : Conditions not met, not touching record");
-        return FLB_FILTER_NOTOUCH;
+        return 0;
     }
 
     bool has_modifications = false;
@@ -823,15 +815,18 @@ static inline int apply_modifying_rules(msgpack_packer * packer,
     msgpack_unpacker unpacker;
     msgpack_unpacked unpacked;
 
+    int initial_buffer_size = 1024 * 8;
+    int new_buffer_size = 0;
+
     struct mk_list *tmp;
     struct mk_list *head;
-
 
     msgpack_sbuffer_init(&sbuffer);
     msgpack_packer_init(&in_packer, &sbuffer, msgpack_sbuffer_write);
     msgpack_unpacked_init(&unpacked);
-    if (!msgpack_unpacker_init(&unpacker, 1024 * 8)) {
-        flb_error("[filter_modify] Unable to allocate memory for unpacker, aborting");
+    if (!msgpack_unpacker_init(&unpacker, initial_buffer_size)) {
+        flb_error
+            ("[filter_modify] Unable to allocate memory for unpacker, aborting");
         return -1;
     }
 
@@ -843,16 +838,19 @@ static inline int apply_modifying_rules(msgpack_packer * packer,
         if (apply_modifying_rule(&in_packer, &map, rule) !=
             FLB_FILTER_NOTOUCH) {
             has_modifications = true;
+            new_buffer_size = sbuffer.size * 2;
 
-            if (msgpack_unpacker_buffer_capacity(&unpacker) < sbuffer.size * 2) {
-                bool result = msgpack_unpacker_reserve_buffer(&unpacker, sbuffer.size * 2);
-                if (!result) {
-                    flb_error("[filter_modify] Unable to re-allocate memory for unpacker, aborting");
+            if (msgpack_unpacker_buffer_capacity(&unpacker) < new_buffer_size) {
+                if (!msgpack_unpacker_reserve_buffer
+                    (&unpacker, new_buffer_size)) {
+                    flb_error
+                        ("[filter_modify] Unable to re-allocate memory for unpacker, aborting");
                     return -1;
                 }
             }
 
-            memcpy(msgpack_unpacker_buffer(&unpacker), sbuffer.data, sbuffer.size);
+            memcpy(msgpack_unpacker_buffer(&unpacker), sbuffer.data,
+                   sbuffer.size);
             msgpack_unpacker_buffer_consumed(&unpacker, sbuffer.size);
 
             msgpack_unpacker_next(&unpacker, &unpacked);
@@ -975,7 +973,7 @@ static int cb_modify_exit(void *data, struct flb_config *config)
 
 struct flb_filter_plugin filter_modify_plugin = {
     .name = "modify",
-    .description = "modify events by specified field values",
+    .description = "modify records by applying rules",
     .cb_init = cb_modify_init,
     .cb_filter = cb_modify_filter,
     .cb_exit = cb_modify_exit,
