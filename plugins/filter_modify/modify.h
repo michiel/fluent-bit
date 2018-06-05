@@ -20,22 +20,12 @@
 #ifndef FLB_FILTER_MODIFY_H
 #define FLB_FILTER_MODIFY_H
 
-/*
-   - set KEY VALUE : Add a key/value pair, overwrite it if the key already exists
-   - add KEY VALUE : Add a key/value pair, only if the key doesn't exist
-   - copy KEY NEWKEY : Copy KEY:value to NEWKEY:value if NEWKEY doesn't exist
-   - hardcopy KEY NEWKEY: Copy KEY:value to NEWKEY:value even if NEWKEY already exists
-   - rename KEY NEWKEY: Rename KEY to NEWKEY, if NEWKEY doesn't exist
-   - hardrename KEY NEWKEY: Rename KEY to NEWKEY, even if NEWKEY exists
-   - remove KEY: Remove KEY if it exists
-   */
 enum FLB_FILTER_MODIFY_RULETYPE {
   RENAME,
   HARD_RENAME,
   ADD,
   SET,
   REMOVE,
-  REMOVE_WILDCARD,
   COPY,
   HARD_COPY
 };
