@@ -98,13 +98,13 @@ static int setup(struct filter_modify_ctx *ctx,
     mk_list_foreach(head, &f_ins->properties) {
         prop = mk_list_entry(head, struct flb_config_prop, _head);
 
-        split = flb_utils_split(prop->val, ' ', 1);
+        split = flb_utils_split(prop->val, ' ', 3);
         list_size = mk_list_size(split);
 
         // Conditions are,
         // CONDITION CONDITIONTYPE VAL_A VAL_B
 
-        if (list_size == 1 || list_size > 3) {
+        if (list_size == 0 || list_size > 3) {
             flb_error("[filter_modify] Invalid config for %s", prop->key);
             teardown(ctx);
             flb_free(rule);
@@ -220,8 +220,8 @@ static int setup(struct filter_modify_ctx *ctx,
                 }
                 else {
                     flb_error
-                        ("[filter_modify] Invalid operation '%s' in configuration",
-                         prop->val);
+                        ("[filter_modify] Invalid operation %s : %s in configuration",
+                         prop->key, prop->val);
                     teardown(ctx);
                     flb_free(rule);
                     return -1;
@@ -260,8 +260,8 @@ static int setup(struct filter_modify_ctx *ctx,
                 }
                 else {
                     flb_error
-                        ("[filter_modify] Invalid operation '%s' in configuration",
-                         prop->val);
+                        ("[filter_modify] Invalid operation %s : %s in configuration",
+                         prop->key, prop->val);
                     teardown(ctx);
                     flb_free(rule);
                     return -1;
@@ -516,13 +516,13 @@ static inline int apply_rule_RENAME(msgpack_packer * packer,
         map_count_keys_matching_str(map, rule->val, rule->val_len);
 
     if (match_keys == 0) {
-        flb_info
+        flb_debug
             ("[filter_modify] Rule RENAME %s TO %s : No keys matching %s found, not applying rule",
              rule->key, rule->val, rule->key);
         return FLB_FILTER_NOTOUCH;
     }
     else if (conflict_keys > 0) {
-        flb_info
+        flb_debug
             ("[filter_modify] Rule RENAME %s TO %s : Existing key %s found, not applying rule",
              rule->key, rule->val, rule->key);
         return FLB_FILTER_NOTOUCH;
@@ -555,7 +555,7 @@ static inline int apply_rule_HARD_RENAME(msgpack_packer * packer,
     msgpack_object_kv *kv;
 
     if (match_keys == 0) {
-        flb_info
+        flb_debug
             ("[filter_modify] Rule HARD_RENAME %s TO %s : No keys matching %s found, not applying rule",
              rule->key, rule->val, rule->key);
         return FLB_FILTER_NOTOUCH;
@@ -607,19 +607,19 @@ static inline int apply_rule_COPY(msgpack_packer * packer,
     msgpack_object_kv *kv;
 
     if (match_keys < 1) {
-        flb_info
+        flb_debug
             ("[filter_modify] Rule COPY %s TO %s : No keys matching %s found, not applying rule",
              rule->key, rule->val, rule->key);
         return FLB_FILTER_NOTOUCH;
     }
     else if (match_keys > 1) {
-        flb_info
+        flb_debug
             ("[filter_modify] Rule COPY %s TO %s : Multiple keys matching %s found, not applying rule",
              rule->key, rule->val, rule->key);
         return FLB_FILTER_NOTOUCH;
     }
     else if (conflict_keys > 0) {
-        flb_info
+        flb_debug
             ("[filter_modify] Rule COPY %s TO %s : Existing keys matching target %s found, not applying rule",
              rule->key, rule->val, rule->key);
         return FLB_FILTER_NOTOUCH;
@@ -654,7 +654,7 @@ static inline int apply_rule_HARD_COPY(msgpack_packer * packer,
     msgpack_object_kv *kv;
 
     if (match_keys < 1) {
-        flb_info
+        flb_debug
             ("[filter_modify] Rule HARD_COPY %s TO %s : No keys matching %s found, not applying rule",
              rule->key, rule->val, rule->key);
         return FLB_FILTER_NOTOUCH;
@@ -721,7 +721,7 @@ static inline int apply_rule_ADD(msgpack_packer * packer,
         return FLB_FILTER_MODIFIED;
     }
     else {
-        flb_info
+        flb_debug
             ("[filter_modify] Rule ADD %s : this key already exists, skipping",
              rule->key);
         return FLB_FILTER_NOTOUCH;
@@ -831,7 +831,7 @@ static inline int apply_modifying_rules(msgpack_packer * packer,
     msgpack_packer_init(&in_packer, &sbuffer, msgpack_sbuffer_write);
     msgpack_unpacked_init(&unpacked);
     if (!msgpack_unpacker_init(&unpacker, 1024 * 8)) {
-        flb_error("NOPE");
+        flb_error("[filter_modify] Unable to allocate memory for unpacker, aborting");
         return -1;
     }
 
@@ -844,6 +844,14 @@ static inline int apply_modifying_rules(msgpack_packer * packer,
             FLB_FILTER_NOTOUCH) {
             has_modifications = true;
 
+            if (msgpack_unpacker_buffer_capacity(&unpacker) < sbuffer.size * 2) {
+                bool result = msgpack_unpacker_reserve_buffer(&unpacker, sbuffer.size * 2);
+                if (!result) {
+                    flb_error("[filter_modify] Unable to re-allocate memory for unpacker, aborting");
+                    return -1;
+                }
+            }
+
             memcpy(msgpack_unpacker_buffer(&unpacker), sbuffer.data, sbuffer.size);
             msgpack_unpacker_buffer_consumed(&unpacker, sbuffer.size);
 
@@ -854,7 +862,7 @@ static inline int apply_modifying_rules(msgpack_packer * packer,
             }
             else {
                 flb_error
-                    ("[modify_filter] Expected MSGPACK_MAP, this is not a valid return value");
+                    ("[modify_filter] Expected MSGPACK_MAP, this is not a valid return value, skipping");
             }
         }
     }
