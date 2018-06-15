@@ -28,18 +28,14 @@ enum FILTER_NEST_OPERATION {
 struct filter_nest_ctx
 {
     enum FILTER_NEST_OPERATION operation;
+    char *key;
+    int key_len;
+    char *prefix;
+    int prefix_len;
     // nest
-    char *nesting_key;
-    int nesting_key_len;
-    char *wildcard;
-    int wildcard_len;
-    bool wildcard_is_dynamic;
+    bool prefix_is_dynamic;
     // lift
-    char *nested_under;
-    int nested_under_len;
-    char *prefix_with;
-    int prefix_with_len;
-    bool use_prefix;
+    bool add_prefix;
 };
 
 #endif
