@@ -9,11 +9,11 @@ char *output = NULL;
 /* Test data */
 
 /* Test functions */
-void flb_test_filter_nest_single(void);
+void flb_test_filter_modify_hammer(void);
 
 /* Test list */
 TEST_LIST = {
-    {"single", flb_test_filter_nest_single },
+    {"hammer", flb_test_filter_modify_hammer },
     {NULL, NULL}
 };
 
@@ -36,9 +36,22 @@ char *get_output(void)
     return val;
 }
 
-void flb_test_filter_nest_single(void)
+int callback_test(void* record, size_t size, void* data)
 {
-    int i;
+    if (size > 0) {
+        flb_error("[test_filter_parser] received record: '%s' with len %s - ", record, size);
+        flb_error("[test_filter_parser] received data: %s", data);
+        set_output(record); /* success */
+        return 0;
+    } else {
+        flb_debug("[test_filter_parser] No data received");
+        set_output(NULL); /* fail */
+        return 1;
+    }
+}
+
+void flb_test_filter_modify_hammer(void)
+{
     int ret;
     int bytes;
     char *p, *output, *expected;
@@ -47,22 +60,53 @@ void flb_test_filter_nest_single(void)
     int out_ffd;
     int filter_ffd;
 
+    struct flb_lib_out_cb cb;
+    cb.cb   = callback_test;
+    cb.data = NULL;
+
     ctx = flb_create();
 
     in_ffd = flb_input(ctx, (char *) "lib", NULL);
     TEST_CHECK(in_ffd >= 0);
     flb_input_set(ctx, in_ffd, "tag", "test", NULL);
 
-    out_ffd = flb_output(ctx, (char *) "stdout", NULL);
+    out_ffd = flb_output(ctx, (char *) "lib", &cb);
+    // out_ffd = flb_output(ctx, (char *) "stdout", &cb);
+    // out_ffd = flb_output(ctx, (char *) "lib", (void*)callback_test);
     TEST_CHECK(out_ffd >= 0);
     flb_output_set(ctx, out_ffd, "match", "test", NULL);
-    filter_ffd = flb_filter(ctx, (char *) "nest", NULL);
+    filter_ffd = flb_filter(ctx, (char *) "modify", NULL);
     TEST_CHECK(filter_ffd >= 0);
 
     ret = flb_filter_set(ctx, filter_ffd,
         "Match", "*",
-        "Wildcard", "to_nest",
-        "Nest_under", "nested_key",
+        "Rename", "wills wood",
+        "Set", "wokka williamson",
+        "Hard_Rename", "witchetty wokka",
+        "Hard_Rename", "wokka wood",
+        "Hard_Rename", "witchetty wills",
+        "Rename", "wollongong wingman",
+        "Rename", "wobbegong wombat",
+        "Set", "wongawonga wingman",
+        "Rename", "wag wombat",
+        "Rename", "witchetty wag",
+        "Set", "wobble wag",
+        "Rename", "willywilly wirrah",
+        "Hard_Rename", "wills wokka",
+        "Hard_Rename", "williamson wombat",
+        "Set", "wood willywilly",
+        "Hard_Rename", "wombat wollongong",
+        "Set", "wills wipe",
+        "Hard_Rename", "wirrah wag",
+        "Set", "wobbegong wood",
+        "Rename", "willy witchetty",
+        "Rename", "wingman wombat",
+        "Set", "willy wombat",
+        "Hard_Rename", "wood wag",
+        "Set", "wills wobble",
+        "Rename", "wobble wingman",
+        "Rename", "wills wobbegong",
+        "Set", "wingman wokka",
         NULL);
 
     TEST_CHECK(ret == 0);
@@ -70,11 +114,11 @@ void flb_test_filter_nest_single(void)
     ret = flb_start(ctx);
     TEST_CHECK(ret == 0);
 
-    p = "[1448403340, {\"to_nest\":\"This is the data to nest\", \"extra\":\"Some more data\"}]";
+    p = "[1448403340, {}]";
     bytes = flb_lib_push(ctx, in_ffd, p, strlen(p));
     TEST_CHECK(bytes == strlen(p));
 
-    sleep(1); /* waiting flush */
+    sleep(5); /* waiting flush */
 
     output = get_output();
     TEST_CHECK_(output != NULL, "Expected output to not be NULL");
