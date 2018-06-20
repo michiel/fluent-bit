@@ -508,6 +508,7 @@ static int cb_nest_exit(void *data, struct flb_config *config)
     flb_free(ctx->key);
 
     teardown(ctx);
+    flb_free(ctx);
     return 0;
 }
 
