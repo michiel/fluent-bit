@@ -31,97 +31,101 @@
 
 #include "nest.h"
 
+static void teardown(struct filter_nest_ctx *ctx)
+{
+    struct mk_list *tmp;
+    struct mk_list *head;
+
+    struct filter_nest_wildcard *wildcard;
+
+    mk_list_foreach_safe(head, tmp, &ctx->wildcards) {
+        wildcard = mk_list_entry(head, struct filter_nest_wildcard, _head);
+        flb_free(wildcard->key);
+        mk_list_del(&wildcard->_head);
+        flb_free(wildcard);
+    }
+
+}
+
 static int configure(struct filter_nest_ctx *ctx,
                      struct flb_filter_instance *f_ins,
                      struct flb_config *config)
 {
-    char *tmp;
+
+    struct mk_list *head;
+    struct flb_config_prop *prop;
+    struct filter_nest_wildcard *wildcard;
 
     char *operation_nest = "nest";
     char *operation_lift = "lift";
 
     ctx->key = NULL;
     ctx->prefix = NULL;
+    ctx->add_prefix = false;
 
-    tmp = flb_filter_get_property("operation", f_ins);
-    if (tmp) {
-        if (strncmp(tmp, operation_nest, 4) == 0) {
-            ctx->operation = NEST;
+    mk_list_foreach(head, &f_ins->properties) {
+        prop = mk_list_entry(head, struct flb_config_prop, _head);
+
+        if (strcasecmp(prop->key, "operation") == 0) {
+            if (strncmp(prop->val, operation_nest, 4) == 0) {
+                ctx->operation = NEST;
+            }
+            else if (strncmp(prop->val, operation_lift, 4) == 0) {
+                ctx->operation = LIFT;
+            }
+            else {
+                flb_error
+                    ("[filter_nest] Key \"operation\" has invalid value '%s'. Expected 'nest' or 'lift'\n", prop->val);
+                return -1;
+            }
         }
-        else if (strncmp(tmp, operation_lift, 4) == 0) {
-            ctx->operation = LIFT;
+        else if (strcasecmp(prop->key, "wildcard") == 0) {
+            wildcard = flb_malloc(sizeof(struct filter_nest_wildcard));
+            if (!wildcard) {
+                flb_error
+                    ("[filter_nest] Unable to allocate memory for wildcard");
+                flb_free(wildcard);
+                return -1;
+            }
+
+            wildcard->key = flb_strndup(prop->val, strlen(prop->val));
+            wildcard->key_len = strlen(prop->val);
+
+            if (wildcard->key[wildcard->key_len - 1] == '*') {
+                wildcard->key_is_dynamic = true;
+                wildcard->key_len--;
+            }
+            else {
+                wildcard->key_is_dynamic = false;
+            }
+
+            mk_list_add(&wildcard->_head, &ctx->wildcards);
+            ctx->wildcards_cnt++;
+
         }
-        else {
-            flb_error
-                ("[filter_nest] Key \"operation\" has invalid value '%s'. Expected 'nest' or 'lift'\n");
-            return -1;
+        else if (strcasecmp(prop->key, "nest_under") == 0) {
+            ctx->key = flb_strdup(prop->val);
+            ctx->key_len = strlen(prop->val);
         }
-    }
-    else {
-        flb_error("[filter_nest] Key \"operation\" is missing\n");
-        return -1;
+        else if (strcasecmp(prop->key, "nested_under") == 0) {
+            ctx->key = flb_strdup(prop->val);
+            ctx->key_len = strlen(prop->val);
+        }
+        else if (strcasecmp(prop->key, "prefix_with") == 0) {
+            ctx->prefix = flb_strdup(prop->val);
+            ctx->prefix_len = strlen(prop->val);
+            ctx->add_prefix = true;
+        }
     }
 
     if (ctx->operation == NEST) {
-
-        tmp = flb_filter_get_property("nest_under", f_ins);
-        if (tmp) {
-            ctx->key = flb_strdup(tmp);
-            ctx->key_len = strlen(tmp);
-        }
-        else {
-            flb_error("[filter_nest] Key \"nest_under\" is missing\n");
-            return -1;
-        }
-
-        tmp = flb_filter_get_property("wildcard", f_ins);
-        if (tmp) {
-            ctx->prefix = flb_strdup(tmp);
-            ctx->prefix_len = strlen(tmp);
-
-            if (ctx->prefix[ctx->prefix_len - 1] == '*') {
-                ctx->prefix_is_dynamic = FLB_TRUE;
-                ctx->prefix_len--;
-            }
-            else {
-                ctx->prefix_is_dynamic = FLB_FALSE;
-            }
-
-        }
-        else {
-            flb_error("[filter_nest] Key \"wildcard\" is missing\n");
-            return -1;
-        }
-
+        // NEST sanity checks
     }
     else if (ctx->operation == LIFT) {
-
-        tmp = flb_filter_get_property("nested_under", f_ins);
-        if (tmp) {
-            ctx->key = flb_strdup(tmp);
-            ctx->key_len = strlen(tmp);
-        }
-        else {
-            flb_error("[filter_nest] Key \"nested_under\" is missing\n");
-            return -1;
-        }
-
-        tmp = flb_filter_get_property("prefix_with", f_ins);
-        if (tmp != NULL) {
-            ctx->prefix = flb_strdup(tmp);
-            ctx->prefix_len = strlen(tmp);
-            ctx->add_prefix = FLB_TRUE;
-        }
-        else {
-            ctx->prefix = NULL;
-            ctx->prefix_len = 0;
-            ctx->add_prefix = FLB_FALSE;
-        }
+        // LIFT sanity checks
     }
     else {
-        // This should be caught when parsing the configuration
-        flb_error("[filter_nest] Key \"operation\" has invalid value\n");
-        return -1;
+        // Error, neither NEST nor LIFT
     }
 
     return 0;
@@ -182,6 +186,10 @@ static inline bool is_kv_to_nest(msgpack_object_kv * kv,
 
     msgpack_object *obj = &kv->key;
 
+    struct mk_list *tmp;
+    struct mk_list *head;
+    struct filter_nest_wildcard *wildcard;
+
     if (obj->type == MSGPACK_OBJECT_BIN) {
         key = (char *) obj->via.bin.ptr;
         klen = obj->via.bin.size;
@@ -195,16 +203,27 @@ static inline bool is_kv_to_nest(msgpack_object_kv * kv,
         return false;
     }
 
-    if (ctx->prefix_is_dynamic) {
-        // This will positively match "ABC123" with prefix "ABC*" 
-        return (strncmp(key, ctx->prefix, ctx->prefix_len) == 0);
+    mk_list_foreach_safe(head, tmp, &ctx->wildcards) {
+        wildcard = mk_list_entry(head, struct filter_nest_wildcard, _head);
+
+        if (wildcard->key_is_dynamic) {
+            // This will positively match "ABC123" with prefix "ABC*" 
+            if (strncmp(key, wildcard->key, wildcard->key_len) == 0) {
+                return true;
+            }
+        }
+        else {
+            // This will positively match "ABC" with prefix "ABC" 
+            if ((wildcard->key_len == klen) &&
+                    (strncmp(key, wildcard->key, klen) == 0)
+              ) {
+                return true;
+            }
+        }
     }
-    else {
-        // This will positively match "ABC" with prefix "ABC" 
-        return ((ctx->prefix_len == klen) &&
-                (strncmp(key, ctx->prefix, klen) == 0)
-            );
-    }
+
+    return false;
+
 }
 
 static inline bool is_not_kv_to_nest(msgpack_object_kv * kv,
@@ -405,10 +424,14 @@ static int cb_nest_init(struct flb_filter_instance *f_ins,
     struct filter_nest_ctx *ctx;
 
     ctx = flb_malloc(sizeof(struct filter_nest_ctx));
+
     if (!ctx) {
         flb_errno();
         return -1;
     }
+
+    mk_list_init(&ctx->wildcards);
+    ctx->wildcards_cnt = 0;
 
     if (configure(ctx, f_ins, config) < 0) {
         flb_free(ctx);
@@ -483,7 +506,8 @@ static int cb_nest_exit(void *data, struct flb_config *config)
 
     flb_free(ctx->prefix);
     flb_free(ctx->key);
-    flb_free(ctx);
+
+    teardown(ctx);
     return 0;
 }
 
