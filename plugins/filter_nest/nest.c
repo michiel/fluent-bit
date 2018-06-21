@@ -38,6 +38,9 @@ static void teardown(struct filter_nest_ctx *ctx)
 
     struct filter_nest_wildcard *wildcard;
 
+    flb_free(ctx->prefix);
+    flb_free(ctx->key);
+
     mk_list_foreach_safe(head, tmp, &ctx->wildcards) {
         wildcard = mk_list_entry(head, struct filter_nest_wildcard, _head);
         flb_free(wildcard->key);
@@ -61,6 +64,7 @@ static int configure(struct filter_nest_ctx *ctx,
 
     ctx->key = NULL;
     ctx->prefix = NULL;
+    ctx->remove_prefix = false;
     ctx->add_prefix = false;
 
     mk_list_foreach(head, &f_ins->properties) {
@@ -116,19 +120,38 @@ static int configure(struct filter_nest_ctx *ctx,
             ctx->prefix_len = strlen(prop->val);
             ctx->add_prefix = true;
         }
+        else if (strcasecmp(prop->key, "remove_prefix") == 0) {
+            ctx->prefix = flb_strdup(prop->val);
+            ctx->prefix_len = strlen(prop->val);
+            ctx->remove_prefix = true;
+        } else {
+            flb_error("[filter_nest] Invalid configuration key '%s'", prop->key);
+            return -1;
+        }
+    }
+
+    // Sanity checks
+
+    if (ctx->remove_prefix && ctx->add_prefix) {
+        flb_error("[filter_nest] prefix_with and remove_prefix are exclusive");
+        return -1;
     }
 
     if (ctx->operation == NEST) {
+        // TODO
         // NEST sanity checks
     }
     else if (ctx->operation == LIFT) {
+        // TODO
         // LIFT sanity checks
     }
     else {
-        // Error, neither NEST nor LIFT
+        flb_error("[filter_nest] Operation can only be NEST or LIFT");
+        return -1;
     }
 
     return 0;
+
 }
 
 static void helper_pack_string(msgpack_packer * packer, const char *str,
@@ -503,9 +526,6 @@ static int cb_nest_filter(void *data, size_t bytes,
 static int cb_nest_exit(void *data, struct flb_config *config)
 {
     struct filter_nest_ctx *ctx = data;
-
-    flb_free(ctx->prefix);
-    flb_free(ctx->key);
 
     teardown(ctx);
     flb_free(ctx);
