@@ -1,10 +1,18 @@
+branches:
+  only:
+  - integration-open-prs
+
+sudo: required
+
+services:
+  - docker
+
 language: c
 compiler:
   - gcc
   - clang
 os:
   - linux
-  - osx
 addons:
   apt:
     sources:
@@ -16,9 +24,6 @@ env:
   - FLB_MEM="-DFLB_JEMALLOC=On"
   - FLB_MEM="-DFLB_JEMALLOC=Off"
 
-notifications:
-  irc: "irc.freenode.net#fluent-bit"
-
 before_script:
   # Install Toolchain for ksz9692 (ARM)
   - if [ $TRAVIS_OS_NAME == linux ]; then if [ `uname -m` = x86_64 ]; then sudo apt-get install -qq --force-yes gcc-multilib > /dev/null; fi; fi
@@ -29,10 +34,18 @@ before_script:
   - cd build
   - cmake -DFLB_ALL=On -DFLB_WITHOUT_EXAMPLES=On $FLB_FLUSH $FLB_MEM -DFLB_TESTS_INTERNAL=On ../
 
-matrix:
-  exclude:
-    - os: osx
-      env: FLB_MEM="-DFLB_JEMALLOC=On"
-
 script: make
-after_script: make test
+after_script:
+  - cd ..
+  - echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+  # - docker login -e $DOCKER_EMAIL -u $DOCKER_USER -p $DOCKER_PASS
+  - export REPO=sddmelb/fluent-bit
+  - export TAG=$TRAVIS_BRANCH
+  - echo $REPO
+  - echo $TAG
+  - echo $TRAVIS_COMMIT
+  # - docker build -f Dockerfile -t $REPO:$COMMIT .
+  - docker build . -f Dockerfile -t $REPO:$TRAVIS_COMMIT
+  - docker tag $REPO:$TRAVIS_COMMIT $REPO:$TAG
+  - docker tag $REPO:$TRAVIS_COMMIT $REPO:travis-$TRAVIS_BUILD_NUMBER
+  - docker push $REPO
